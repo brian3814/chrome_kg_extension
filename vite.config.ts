@@ -1,0 +1,135 @@
+import { defineConfig, type Plugin } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+import { resolve } from 'path';
+import { build as viteBuild } from 'vite';
+import { access, readFile, writeFile, rmdir, unlink, copyFile } from 'fs/promises';
+
+// Plugin to build the content script as IIFE after main build
+function contentScriptPlugin(): Plugin {
+  return {
+    name: 'content-script-build',
+    apply: 'build',
+    closeBundle: async () => {
+      await viteBuild({
+        configFile: false,
+        build: {
+          outDir: resolve(__dirname, 'dist'),
+          emptyOutDir: false,
+          lib: {
+            entry: resolve(__dirname, 'src/content-script/index.ts'),
+            name: 'contentScript',
+            formats: ['iife'],
+            fileName: () => 'content-script.js',
+          },
+          rollupOptions: {
+            output: {
+              extend: true,
+            },
+          },
+        },
+      });
+    },
+  };
+}
+
+// Plugin to build the db-worker as a separate self-contained ES module.
+// Chrome extension CSP blocks blob: URLs, so we build the worker separately
+// and load it via a direct chrome-extension:// URL.
+function dbWorkerPlugin(): Plugin {
+  return {
+    name: 'db-worker-build',
+    apply: 'build',
+    closeBundle: async () => {
+      await viteBuild({
+        configFile: false,
+        base: '',
+        resolve: {
+          alias: {
+            '@': resolve(__dirname, 'src'),
+          },
+        },
+        build: {
+          outDir: resolve(__dirname, 'dist'),
+          emptyOutDir: false,
+          sourcemap: false,
+          rollupOptions: {
+            input: {
+              'db-worker': resolve(__dirname, 'src/db/worker/db-worker.ts'),
+            },
+            output: {
+              entryFileNames: 'db-worker.js',
+              // Keep WASM and other assets without hashes for predictable URLs
+              assetFileNames: '[name][extname]',
+              chunkFileNames: 'assets/[name].js',
+              // Inline everything into one file
+              manualChunks: undefined,
+            },
+          },
+        },
+      });
+    },
+  };
+}
+
+// Plugin to move the HTML file and fix asset paths.
+// Vite outputs src/ui/index.html -> dist/src/ui/index.html.
+// We move it to dist/index.html and fix the asset paths.
+function fixHtmlPlugin(): Plugin {
+  return {
+    name: 'fix-html',
+    apply: 'build',
+    closeBundle: async () => {
+      const nested = resolve(__dirname, 'dist/src/ui/index.html');
+      const target = resolve(__dirname, 'dist/index.html');
+      try {
+        await access(nested);
+        let html = await readFile(nested, 'utf-8');
+        html = html.replace(/(?:\.\.\/)+assets\//g, 'assets/');
+        await writeFile(target, html, 'utf-8');
+        await unlink(nested).catch(() => {});
+        await rmdir(resolve(__dirname, 'dist/src/ui')).catch(() => {});
+        await rmdir(resolve(__dirname, 'dist/src')).catch(() => {});
+      } catch {
+        // File might already be in the right place
+      }
+    },
+  };
+}
+
+export default defineConfig({
+  base: '',
+  plugins: [react(), tailwindcss(), fixHtmlPlugin(), dbWorkerPlugin(), contentScriptPlugin()],
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, 'src'),
+      // Redirect troika-worker-utils to our shim that runs everything on the
+      // main thread. Chrome MV3 CSP blocks blob: URLs which troika uses for
+      // inline workers, causing silent failures in text rendering.
+      'troika-worker-utils': resolve(__dirname, 'src/lib/troika-worker-utils-shim.ts'),
+    },
+  },
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+    sourcemap: true,
+    minify: false,
+    modulePreload: false,
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'src/ui/index.html'),
+        'service-worker': resolve(__dirname, 'src/service-worker/index.ts'),
+        offscreen: resolve(__dirname, 'src/offscreen/index.ts'),
+      },
+      output: {
+        entryFileNames: (chunkInfo) => {
+          if (chunkInfo.name === 'service-worker') return 'service-worker.js';
+          if (chunkInfo.name === 'offscreen') return 'offscreen.js';
+          return 'assets/[name]-[hash].js';
+        },
+        chunkFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash].[ext]',
+      },
+    },
+  },
+});

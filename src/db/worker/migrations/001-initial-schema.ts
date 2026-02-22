@@ -1,0 +1,64 @@
+export const version = 1;
+export const description = 'Initial schema: nodes, edges, entity_aliases, extraction_log';
+
+export const up = `
+CREATE TABLE IF NOT EXISTS nodes (
+    id          TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    label       TEXT NOT NULL,
+    type        TEXT NOT NULL DEFAULT 'entity',
+    properties  TEXT NOT NULL DEFAULT '{}',
+    x           REAL,
+    y           REAL,
+    z           REAL,
+    color       TEXT,
+    size        REAL DEFAULT 1.0,
+    source_url  TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes(type);
+CREATE INDEX IF NOT EXISTS idx_nodes_label ON nodes(label);
+
+CREATE TABLE IF NOT EXISTS edges (
+    id          TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    source_id   TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    target_id   TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    label       TEXT NOT NULL,
+    type        TEXT NOT NULL DEFAULT 'related',
+    properties  TEXT NOT NULL DEFAULT '{}',
+    weight      REAL DEFAULT 1.0,
+    directed    INTEGER NOT NULL DEFAULT 1,
+    source_url  TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(source_id, target_id, label)
+);
+CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_id);
+CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id);
+
+CREATE TABLE IF NOT EXISTS entity_aliases (
+    id          TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    node_id     TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    alias       TEXT NOT NULL,
+    alias_lower TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_aliases_lower ON entity_aliases(alias_lower);
+
+CREATE TABLE IF NOT EXISTS extraction_log (
+    id          TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    source_url  TEXT,
+    source_text TEXT,
+    provider    TEXT NOT NULL,
+    model       TEXT NOT NULL,
+    raw_output  TEXT,
+    nodes_added INTEGER DEFAULT 0,
+    edges_added INTEGER DEFAULT 0,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS schema_version (
+    version     INTEGER PRIMARY KEY,
+    applied_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    description TEXT
+);
+`;

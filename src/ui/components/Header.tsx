@@ -1,0 +1,153 @@
+import React from 'react';
+import { useDisplayMode } from '../hooks/useDisplayMode';
+import { useUIStore } from '../../graph/store/ui-store';
+import { useGraphStore } from '../../graph/store/graph-store';
+
+export function Header() {
+  const { displayMode, toggleMode } = useDisplayMode();
+  const { activePanel, setActivePanel, is3D, toggle3D, clusteringEnabled, toggleClustering } = useUIStore();
+  const nodeCount = useGraphStore((s) => s.nodes.length);
+  const edgeCount = useGraphStore((s) => s.edges.length);
+  const isSidePanel = displayMode === 'sidePanel';
+
+  return (
+    <header className="flex items-center justify-between px-3 py-2 bg-zinc-800 border-b border-zinc-700 shrink-0">
+      <div className="flex items-center gap-2">
+        <h1 className="text-sm font-semibold text-zinc-100">Knowledge Graph</h1>
+        <span className="text-xs text-zinc-500">
+          {nodeCount}n · {edgeCount}e
+        </span>
+      </div>
+
+      <div className="flex items-center gap-1">
+        <ToolbarButton
+          active={activePanel === 'search'}
+          onClick={() => setActivePanel('search')}
+          title="Search"
+        >
+          <SearchIcon />
+        </ToolbarButton>
+
+        <ToolbarButton
+          active={activePanel === 'create'}
+          onClick={() => setActivePanel('create')}
+          title="Create"
+        >
+          <PlusIcon />
+        </ToolbarButton>
+
+        <ToolbarButton
+          active={activePanel === 'llm'}
+          onClick={() => setActivePanel('llm')}
+          title="LLM Extract"
+        >
+          <SparklesIcon />
+        </ToolbarButton>
+
+        <div className="w-px h-4 bg-zinc-600 mx-1" />
+
+        <ToolbarButton
+          active={clusteringEnabled}
+          onClick={toggleClustering}
+          title="Toggle clustering"
+        >
+          <ClusterIcon />
+        </ToolbarButton>
+
+        {!isSidePanel && (
+          <ToolbarButton
+            active={is3D}
+            onClick={toggle3D}
+            title="Toggle 3D"
+          >
+            <span className="text-[10px] font-bold">3D</span>
+          </ToolbarButton>
+        )}
+
+        <div className="w-px h-4 bg-zinc-600 mx-1" />
+
+        <ToolbarButton
+          active={activePanel === 'settings'}
+          onClick={() => setActivePanel('settings')}
+          title="Settings"
+        >
+          <GearIcon />
+        </ToolbarButton>
+
+        <ToolbarButton onClick={toggleMode} title={isSidePanel ? 'Pop out to tab' : 'Dock to side panel'}>
+          {isSidePanel ? <ExternalIcon /> : <PanelIcon />}
+        </ToolbarButton>
+      </div>
+    </header>
+  );
+}
+
+function ToolbarButton({
+  children,
+  active,
+  onClick,
+  title,
+}: {
+  children: React.ReactNode;
+  active?: boolean;
+  onClick: () => void;
+  title: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className={`p-1.5 rounded transition-colors ${
+        active
+          ? 'bg-indigo-600 text-white'
+          : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+// Simple SVG icons (16x16)
+const SearchIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+  </svg>
+);
+
+const PlusIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <path d="M12 5v14M5 12h14"/>
+  </svg>
+);
+
+const SparklesIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+  </svg>
+);
+
+const ClusterIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <circle cx="12" cy="12" r="3"/><circle cx="5" cy="7" r="2"/><circle cx="19" cy="7" r="2"/><circle cx="5" cy="17" r="2"/><circle cx="19" cy="17" r="2"/>
+  </svg>
+);
+
+const GearIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+    <circle cx="12" cy="12" r="3"/>
+  </svg>
+);
+
+const ExternalIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+  </svg>
+);
+
+const PanelIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/>
+  </svg>
+);

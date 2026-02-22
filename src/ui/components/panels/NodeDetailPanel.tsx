@@ -1,0 +1,178 @@
+import React, { useState, useEffect } from 'react';
+import { useGraphStore } from '../../../graph/store/graph-store';
+import { useUIStore } from '../../../graph/store/ui-store';
+import { PropertyEditor } from './PropertyEditor';
+import { NODE_TYPE_COLORS } from '../../../shared/constants';
+
+export function NodeDetailPanel() {
+  const selectedNodeId = useGraphStore((s) => s.selectedNodeId);
+  const nodes = useGraphStore((s) => s.nodes);
+  const edges = useGraphStore((s) => s.edges);
+  const updateNode = useGraphStore((s) => s.updateNode);
+  const deleteNode = useGraphStore((s) => s.deleteNode);
+  const selectEdge = useGraphStore((s) => s.selectEdge);
+  const setActivePanel = useUIStore((s) => s.setActivePanel);
+
+  const node = nodes.find((n) => n.id === selectedNodeId);
+  const connectedEdges = edges.filter(
+    (e) => e.sourceId === selectedNodeId || e.targetId === selectedNodeId
+  );
+
+  const [editing, setEditing] = useState(false);
+  const [label, setLabel] = useState('');
+  const [type, setType] = useState('');
+  const [properties, setProperties] = useState<Record<string, unknown>>({});
+
+  useEffect(() => {
+    if (node) {
+      setLabel(node.label);
+      setType(node.type);
+      setProperties(node.properties);
+      setEditing(false);
+    }
+  }, [node]);
+
+  if (!node) {
+    return (
+      <div className="p-4 text-zinc-500 text-sm">
+        No node selected
+      </div>
+    );
+  }
+
+  const handleSave = async () => {
+    await updateNode({ id: node.id, label, type, properties });
+    setEditing(false);
+  };
+
+  const handleDelete = async () => {
+    if (confirm(`Delete node "${node.label}"? Connected edges will also be removed.`)) {
+      await deleteNode(node.id);
+      setActivePanel('none');
+    }
+  };
+
+  const color = node.color || NODE_TYPE_COLORS[node.type] || NODE_TYPE_COLORS.entity;
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
+          <h3 className="text-sm font-semibold text-zinc-100">Node Detail</h3>
+        </div>
+        <div className="flex gap-1">
+          {!editing ? (
+            <button
+              onClick={() => setEditing(true)}
+              className="text-xs px-2 py-1 bg-zinc-700 text-zinc-300 rounded hover:bg-zinc-600"
+            >
+              Edit
+            </button>
+          ) : (
+            <button
+              onClick={handleSave}
+              className="text-xs px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-500"
+            >
+              Save
+            </button>
+          )}
+          <button
+            onClick={handleDelete}
+            className="text-xs px-2 py-1 bg-red-900/50 text-red-400 rounded hover:bg-red-900"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <Field label="Label">
+          {editing ? (
+            <input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+            />
+          ) : (
+            <span className="text-sm text-zinc-200">{node.label}</span>
+          )}
+        </Field>
+
+        <Field label="Type">
+          {editing ? (
+            <input
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+            />
+          ) : (
+            <span className="text-sm text-zinc-200 capitalize">{node.type}</span>
+          )}
+        </Field>
+
+        <Field label="Properties">
+          {editing ? (
+            <PropertyEditor value={properties} onChange={setProperties} />
+          ) : (
+            <pre className="text-xs text-zinc-400 bg-zinc-800 rounded p-2 overflow-x-auto">
+              {JSON.stringify(node.properties, null, 2)}
+            </pre>
+          )}
+        </Field>
+
+        {node.sourceUrl && (
+          <Field label="Source">
+            <span className="text-xs text-indigo-400 break-all">{node.sourceUrl}</span>
+          </Field>
+        )}
+
+        <Field label="Created">
+          <span className="text-xs text-zinc-500">{node.createdAt}</span>
+        </Field>
+      </div>
+
+      {connectedEdges.length > 0 && (
+        <div>
+          <h4 className="text-xs font-medium text-zinc-400 mb-2">
+            Connected Edges ({connectedEdges.length})
+          </h4>
+          <div className="space-y-1">
+            {connectedEdges.map((edge) => {
+              const otherNode = nodes.find(
+                (n) => n.id === (edge.sourceId === node.id ? edge.targetId : edge.sourceId)
+              );
+              return (
+                <button
+                  key={edge.id}
+                  onClick={() => {
+                    selectEdge(edge.id);
+                    setActivePanel('edgeDetail');
+                  }}
+                  className="w-full text-left px-2 py-1.5 bg-zinc-800 rounded text-xs hover:bg-zinc-700 flex items-center gap-2"
+                >
+                  <span className="text-zinc-400">
+                    {edge.sourceId === node.id ? '→' : '←'}
+                  </span>
+                  <span className="text-indigo-400">{edge.label}</span>
+                  <span className="text-zinc-500">
+                    {otherNode?.label ?? '?'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="text-xs font-medium text-zinc-400 block mb-1">{label}</label>
+      {children}
+    </div>
+  );
+}
