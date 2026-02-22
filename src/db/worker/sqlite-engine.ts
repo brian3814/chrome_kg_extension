@@ -134,22 +134,15 @@ export function getChanges(): number {
  * Check if a SQLite compile-time module (like fts5) is available
  * by querying the module list pragma.
  */
-export function checkModuleAvailable(moduleName: string): Promise<boolean> {
-  return serialize(async () => {
-    if (!sqlite3 || db === null) return false;
-    try {
-      const results: string[] = [];
-      await sqlite3.exec(
-        db,
-        `SELECT name FROM pragma_module_list WHERE name = '${moduleName}';`,
-        (row: unknown[]) => {
-          results.push(row[0] as string);
-        }
-      );
-      return results.length > 0;
-    } catch {
-      // pragma_module_list might not be available either
-      return false;
-    }
-  });
+export async function checkModuleAvailable(moduleName: string): Promise<boolean> {
+  try {
+    const rows = await query<{ name: string }>(
+      `SELECT name FROM pragma_module_list WHERE name = ?;`,
+      [moduleName]
+    );
+    return rows.length > 0;
+  } catch {
+    // pragma_module_list might not be available either
+    return false;
+  }
 }

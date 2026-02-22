@@ -57,7 +57,8 @@ export async function runMigrations(): Promise<number> {
         console.log(`[DB] Skipping migration ${migration.version}: FTS5 module not available`);
         try {
           await exec(
-            `INSERT OR IGNORE INTO schema_version (version, description) VALUES (${migration.version}, '${migration.description} (skipped - no fts5)');`
+            `INSERT OR IGNORE INTO schema_version (version, description) VALUES (?, ?);`,
+            [migration.version, `${migration.description} (skipped - no fts5)`]
           );
         } catch {
           // Ignore
@@ -78,7 +79,8 @@ export async function runMigrations(): Promise<number> {
         }
 
         await exec(
-          `INSERT INTO schema_version (version, description) VALUES (${migration.version}, '${migration.description}');`
+          `INSERT INTO schema_version (version, description) VALUES (?, ?);`,
+          [migration.version, migration.description]
         );
         appliedVersion = migration.version;
 
@@ -92,7 +94,8 @@ export async function runMigrations(): Promise<number> {
           console.warn(`[DB] Optional migration ${migration.version} failed (skipping):`, e);
           try {
             await exec(
-              `INSERT OR IGNORE INTO schema_version (version, description) VALUES (${migration.version}, '${migration.description} (skipped)');`
+              `INSERT OR IGNORE INTO schema_version (version, description) VALUES (?, ?);`,
+              [migration.version, `${migration.description} (skipped)`]
             );
           } catch {
             // Ignore
