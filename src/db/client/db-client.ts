@@ -134,6 +134,12 @@ export const edges = {
   getBetween: (nodeIds: string[]) => sendRequest('edges.getBetween', nodeIds) as Promise<any[]>,
 };
 
+// Query engine operations
+export const graph = {
+  query: (graphQuery: unknown) => sendRequest('query.execute', graphQuery),
+  mutate: (mutation: unknown) => sendRequest('mutation.execute', mutation),
+};
+
 export function isDbReady(): boolean {
   return initPromise !== null;
 }

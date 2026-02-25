@@ -61,6 +61,15 @@ async function handleMessageAsync(
       return { alive: true };
     }
 
+    case 'QUERY_EXECUTE':
+    case 'MUTATION_EXECUTE': {
+      // Forward to the extension's UI view (side panel or tab) which owns the DB worker.
+      // chrome.runtime.sendMessage broadcasts to all extension contexts;
+      // the UI's query-message-handler listener will pick it up and respond.
+      const response = await chrome.runtime.sendMessage(message);
+      return response;
+    }
+
     default:
       console.warn('[SW] Unknown message type:', message.type);
       return { error: 'Unknown message type' };

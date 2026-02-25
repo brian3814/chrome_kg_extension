@@ -1,6 +1,7 @@
 // Database row types
 export interface DbNode {
   id: string;
+  identifier: string | null;
   label: string;
   type: string;
   properties: string; // JSON string
@@ -50,6 +51,7 @@ export interface DbExtractionLog {
 // Application types (parsed from DB rows)
 export interface GraphNode {
   id: string;
+  identifier: string | null;
   label: string;
   type: string;
   properties: Record<string, unknown>;
@@ -86,6 +88,7 @@ export interface GraphData {
 export interface CreateNodeInput {
   label: string;
   type?: string;
+  identifier?: string;
   properties?: Record<string, unknown>;
   color?: string;
   size?: number;

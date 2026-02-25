@@ -114,6 +114,21 @@ export interface KeepaliveMessage extends ExtensionMessage {
   type: 'KEEPALIVE';
 }
 
+// Query engine messages (external extension API)
+export interface QueryExecuteMessage extends ExtensionMessage {
+  type: 'QUERY_EXECUTE';
+  payload: {
+    query: unknown;
+  };
+}
+
+export interface MutationExecuteMessage extends ExtensionMessage {
+  type: 'MUTATION_EXECUTE';
+  payload: {
+    mutation: unknown;
+  };
+}
+
 // Union of all chrome.runtime messages
 export type RuntimeMessage =
   | PageContentMessage
@@ -126,7 +141,9 @@ export type RuntimeMessage =
   | OpenSidePanelMessage
   | OpenTabMessage
   | ToggleDisplayModeMessage
-  | KeepaliveMessage;
+  | KeepaliveMessage
+  | QueryExecuteMessage
+  | MutationExecuteMessage;
 
 // Helper to create messages
 export function createMessage<T extends ExtensionMessage>(

@@ -15,20 +15,24 @@ export async function getNodeById(id: string): Promise<DbNode | null> {
 export async function createNode(input: {
   label: string;
   type?: string;
+  identifier?: string;
   properties?: string;
   color?: string;
   size?: number;
   sourceUrl?: string;
 }): Promise<DbNode> {
   const id = generateId();
+  const type = input.type ?? 'entity';
+  const identifier = input.identifier ?? generateIdentifier(type, input.label);
   const { rows } = await executeQuery<DbNode>(
-    `INSERT INTO nodes (id, label, type, properties, color, size, source_url)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO nodes (id, identifier, label, type, properties, color, size, source_url)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      RETURNING *;`,
     [
       id,
+      identifier,
       input.label,
-      input.type ?? 'entity',
+      type,
       input.properties ?? '{}',
       input.color ?? null,
       input.size ?? 1.0,
@@ -161,6 +165,15 @@ export async function getNeighborhood(
     [nodeId, hops]
   );
   return { nodeIds: rows.map((r) => r.id) };
+}
+
+export function generateIdentifier(type: string, label: string): string {
+  const slug = label
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${type.toLowerCase()}/${slug}`;
 }
 
 function generateId(): string {

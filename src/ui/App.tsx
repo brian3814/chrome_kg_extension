@@ -3,6 +3,7 @@ import { useDbInit } from '../db/client/db-hooks';
 import { useGraphStore } from '../graph/store/graph-store';
 import { useUIStore } from '../graph/store/ui-store';
 import { useDisplayMode } from './hooks/useDisplayMode';
+import { registerQueryMessageHandler } from '../db/client/query-message-handler';
 import { SidePanelLayout } from './layouts/SidePanelLayout';
 import { TabLayout } from './layouts/TabLayout';
 
@@ -19,6 +20,7 @@ export default function App() {
   useEffect(() => {
     if (ready) {
       loadAll();
+      return registerQueryMessageHandler();
     }
   }, [ready, loadAll]);
 

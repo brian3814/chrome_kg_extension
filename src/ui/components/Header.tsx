@@ -29,6 +29,14 @@ export function Header() {
         </ToolbarButton>
 
         <ToolbarButton
+          active={activePanel === 'query'}
+          onClick={() => setActivePanel('query')}
+          title="Query"
+        >
+          <FilterIcon />
+        </ToolbarButton>
+
+        <ToolbarButton
           active={activePanel === 'create'}
           onClick={() => setActivePanel('create')}
           title="Create"
@@ -112,6 +120,12 @@ function ToolbarButton({
 const SearchIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
     <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+  </svg>
+);
+
+const FilterIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
   </svg>
 );
 

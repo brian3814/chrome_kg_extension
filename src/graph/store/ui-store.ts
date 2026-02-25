@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { DisplayMode } from '../../shared/types';
 
-type ActivePanel = 'none' | 'nodeDetail' | 'edgeDetail' | 'create' | 'search' | 'llm' | 'settings';
+type ActivePanel = 'none' | 'nodeDetail' | 'edgeDetail' | 'create' | 'search' | 'query' | 'llm' | 'settings';
 type LayoutType = string;
 
 interface UIStore {

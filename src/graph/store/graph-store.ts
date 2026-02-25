@@ -5,6 +5,7 @@ import type { GraphNode, GraphEdge, GraphData, CreateNodeInput, UpdateNodeInput,
 function dbNodeToGraphNode(row: DbNode): GraphNode {
   return {
     id: row.id,
+    identifier: row.identifier,
     label: row.label,
     type: row.type,
     properties: JSON.parse(row.properties || '{}'),

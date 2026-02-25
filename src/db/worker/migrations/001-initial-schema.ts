@@ -1,9 +1,10 @@
 export const version = 1;
-export const description = 'Initial schema: nodes, edges, entity_aliases, extraction_log';
+export const description = 'Initial schema: nodes, edges, entity_aliases, extraction_log, ontology';
 
 export const up = `
 CREATE TABLE IF NOT EXISTS nodes (
     id          TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    identifier  TEXT UNIQUE,
     label       TEXT NOT NULL,
     type        TEXT NOT NULL DEFAULT 'entity',
     properties  TEXT NOT NULL DEFAULT '{}',
@@ -18,6 +19,7 @@ CREATE TABLE IF NOT EXISTS nodes (
 );
 CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes(type);
 CREATE INDEX IF NOT EXISTS idx_nodes_label ON nodes(label);
+CREATE INDEX IF NOT EXISTS idx_nodes_identifier ON nodes(identifier);
 
 CREATE TABLE IF NOT EXISTS edges (
     id          TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
@@ -60,5 +62,20 @@ CREATE TABLE IF NOT EXISTS schema_version (
     version     INTEGER PRIMARY KEY,
     applied_at  TEXT NOT NULL DEFAULT (datetime('now')),
     description TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ontology_node_types (
+    type              TEXT PRIMARY KEY,
+    description       TEXT,
+    parent_type       TEXT REFERENCES ontology_node_types(type),
+    properties_schema TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ontology_edge_types (
+    type              TEXT PRIMARY KEY,
+    description       TEXT,
+    source_types      TEXT,
+    target_types      TEXT,
+    properties_schema TEXT
 );
 `;
