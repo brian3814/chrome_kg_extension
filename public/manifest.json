@@ -9,7 +9,8 @@
     "storage",
     "activeTab",
     "contextMenus",
-    "offscreen"
+    "offscreen",
+    "readingList"
   ],
   "action": {
     "default_title": "Knowledge Graph"
