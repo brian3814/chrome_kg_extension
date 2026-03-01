@@ -161,6 +161,13 @@ export interface ExtractionDiff {
   items: DiffItem[];
 }
 
+// Node type (from ontology_node_types table)
+export interface NodeType {
+  type: string;
+  description: string | null;
+  color: string | null;
+}
+
 // Display mode
 export type DisplayMode = 'sidePanel' | 'tab';
 

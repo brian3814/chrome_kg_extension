@@ -1,15 +1,20 @@
 export const DB_NAME = 'kg_extension.db';
 
-export const NODE_TYPE_COLORS: Record<string, string> = {
-  person: '#4F46E5',     // indigo
-  organization: '#059669', // emerald
-  location: '#D97706',   // amber
-  event: '#DC2626',      // red
-  concept: '#7C3AED',    // violet
-  technology: '#0891B2', // cyan
-  document: '#65A30D',   // lime
-  entity: '#6B7280',     // gray (default)
-};
+export const TYPE_COLOR_PALETTE = [
+  '#059669', // emerald
+  '#7C3AED', // violet
+  '#4F46E5', // indigo
+  '#D97706', // amber
+  '#DC2626', // red
+  '#0891B2', // cyan
+  '#65A30D', // lime
+  '#DB2777', // pink
+  '#EA580C', // orange
+  '#0D9488', // teal
+];
+
+export const DEFAULT_NODE_TYPE = 'concept';
+export const FALLBACK_TYPE_COLOR = '#6B7280'; // gray
 
 export const DEFAULT_NODE_SIZE = 1.0;
 export const DEFAULT_EDGE_WEIGHT = 1.0;

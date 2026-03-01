@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useGraphStore } from '../../../graph/store/graph-store';
-import { NODE_TYPE_COLORS } from '../../../shared/constants';
+import { useNodeTypeStore } from '../../../graph/store/node-type-store';
+import { DEFAULT_NODE_TYPE } from '../../../shared/constants';
+import { AddTypeModal } from './AddTypeModal';
 
 type CreateTab = 'node' | 'edge';
 
@@ -37,13 +39,23 @@ export function CreatePanel() {
   );
 }
 
+const ADD_NEW_TYPE_VALUE = '__add_new__';
+
 function CreateNodeForm() {
   const createNode = useGraphStore((s) => s.createNode);
+  const types = useNodeTypeStore((s) => s.types);
   const [label, setLabel] = useState('');
-  const [type, setType] = useState('entity');
+  const [type, setType] = useState(DEFAULT_NODE_TYPE);
   const [error, setError] = useState('');
+  const [showAddType, setShowAddType] = useState(false);
 
-  const types = Object.keys(NODE_TYPE_COLORS);
+  const handleTypeChange = (value: string) => {
+    if (value === ADD_NEW_TYPE_VALUE) {
+      setShowAddType(true);
+    } else {
+      setType(value);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,49 +69,59 @@ function CreateNodeForm() {
     const result = await createNode({ label: label.trim(), type });
     if (result) {
       setLabel('');
-      setType('entity');
+      setType(DEFAULT_NODE_TYPE);
     } else {
       setError('Failed to create node');
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-3">
-      <div>
-        <label className="text-xs font-medium text-zinc-400 block mb-1">Label</label>
-        <input
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          placeholder="Enter node label..."
-          className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-indigo-500 placeholder-zinc-600"
-          autoFocus
-        />
-      </div>
+    <>
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <div>
+          <label className="text-xs font-medium text-zinc-400 block mb-1">Label</label>
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Enter node label..."
+            className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-indigo-500 placeholder-zinc-600"
+            autoFocus
+          />
+        </div>
 
-      <div>
-        <label className="text-xs font-medium text-zinc-400 block mb-1">Type</label>
-        <select
-          value={type}
-          onChange={(e) => setType(e.target.value)}
-          className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+        <div>
+          <label className="text-xs font-medium text-zinc-400 block mb-1">Type</label>
+          <select
+            value={type}
+            onChange={(e) => handleTypeChange(e.target.value)}
+            className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+          >
+            {types.map((t) => (
+              <option key={t.type} value={t.type}>
+                {t.type}
+              </option>
+            ))}
+            <option value={ADD_NEW_TYPE_VALUE}>+ Add new type...</option>
+          </select>
+        </div>
+
+        {error && <p className="text-xs text-red-400">{error}</p>}
+
+        <button
+          type="submit"
+          className="w-full bg-indigo-600 text-white text-sm py-1.5 rounded hover:bg-indigo-500 transition-colors"
         >
-          {types.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
-      </div>
+          Create Node
+        </button>
+      </form>
 
-      {error && <p className="text-xs text-red-400">{error}</p>}
-
-      <button
-        type="submit"
-        className="w-full bg-indigo-600 text-white text-sm py-1.5 rounded hover:bg-indigo-500 transition-colors"
-      >
-        Create Node
-      </button>
-    </form>
+      {showAddType && (
+        <AddTypeModal
+          onClose={() => setShowAddType(false)}
+          onCreated={(newType) => setType(newType)}
+        />
+      )}
+    </>
   );
 }
 

@@ -5,7 +5,7 @@ const EXTRACTION_SYSTEM_PROMPT = `You are a knowledge graph extraction assistant
 Output format:
 {
   "nodes": [
-    { "label": "Entity Name", "type": "person|organization|location|event|concept|technology|document", "properties": { "key": "value" } }
+    { "label": "Entity Name", "type": "descriptive_type", "properties": { "key": "value" } }
   ],
   "edges": [
     { "sourceLabel": "Source Entity", "targetLabel": "Target Entity", "label": "relationship_type", "type": "relationship_category" }
@@ -15,7 +15,7 @@ Output format:
 Rules:
 - Extract the most important entities and relationships
 - Use consistent, lowercase relationship labels (e.g., "works_at", "located_in", "created_by")
-- Choose the most specific entity type from: person, organization, location, event, concept, technology, document
+- For node types, use short lowercase descriptive labels (e.g., "person", "company", "concept", "tool", "resource"). Choose the most specific type that fits.
 - Include relevant properties as key-value pairs
 - Ensure all edges reference entities that exist in the nodes array
 - Return ONLY valid JSON, no other text`;

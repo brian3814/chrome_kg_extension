@@ -22,7 +22,7 @@ export async function createNode(input: {
   sourceUrl?: string;
 }): Promise<DbNode> {
   const id = generateId();
-  const type = input.type ?? 'entity';
+  const type = input.type ?? 'concept';
   const identifier = input.identifier ?? generateIdentifier(type, input.label);
   const { rows } = await executeQuery<DbNode>(
     `INSERT INTO nodes (id, identifier, label, type, properties, color, size, source_url)

@@ -1,5 +1,5 @@
 import React from 'react';
-import { NODE_TYPE_COLORS } from '../../../shared/constants';
+import { useNodeTypeStore } from '../../../graph/store/node-type-store';
 
 interface NodeTooltipProps {
   node: {
@@ -14,8 +14,9 @@ interface NodeTooltipProps {
 }
 
 export function NodeTooltip({ node }: NodeTooltipProps) {
-  const type = node.data?.type ?? 'entity';
-  const color = NODE_TYPE_COLORS[type] || NODE_TYPE_COLORS.entity;
+  const getColorForType = useNodeTypeStore((s) => s.getColorForType);
+  const type = node.data?.type ?? 'concept';
+  const color = getColorForType(type);
 
   return (
     <div className="bg-zinc-800 border border-zinc-600 rounded-lg p-3 shadow-xl max-w-[250px]">

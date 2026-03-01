@@ -134,6 +134,14 @@ export const edges = {
   getBetween: (nodeIds: string[]) => sendRequest('edges.getBetween', nodeIds) as Promise<any[]>,
 };
 
+// Node type operations
+export const nodeTypes = {
+  getAll: () => sendRequest('nodeTypes.getAll') as Promise<any[]>,
+  create: (input: { type: string; description?: string; color?: string }) =>
+    sendRequest('nodeTypes.create', input) as Promise<any>,
+  delete: (type: string) => sendRequest('nodeTypes.delete', type) as Promise<boolean>,
+};
+
 // Query engine operations
 export const graph = {
   query: (graphQuery: unknown) => sendRequest('query.execute', graphQuery),

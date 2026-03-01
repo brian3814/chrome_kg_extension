@@ -1,8 +1,8 @@
 import React, { useState, useCallback } from 'react';
 import { useGraphStore } from '../../../graph/store/graph-store';
 import { useUIStore } from '../../../graph/store/ui-store';
+import { useNodeTypeStore } from '../../../graph/store/node-type-store';
 import { nodes as dbNodes } from '../../../db/client/db-client';
-import { NODE_TYPE_COLORS } from '../../../shared/constants';
 import type { DbNode } from '../../../shared/types';
 
 export function SearchPanel() {
@@ -12,6 +12,7 @@ export function SearchPanel() {
   const selectNode = useGraphStore((s) => s.selectNode);
   const setActivePanel = useUIStore((s) => s.setActivePanel);
   const allNodes = useGraphStore((s) => s.nodes);
+  const getColorForType = useNodeTypeStore((s) => s.getColorForType);
 
   const handleSearch = useCallback(async (q: string) => {
     setQuery(q);
@@ -77,7 +78,7 @@ export function SearchPanel() {
       {results.length > 0 && (
         <div className="space-y-1">
           {results.map((node) => {
-            const color = NODE_TYPE_COLORS[node.type] || NODE_TYPE_COLORS.entity;
+            const color = getColorForType(node.type);
             return (
               <button
                 key={node.id}

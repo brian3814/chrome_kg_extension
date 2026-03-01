@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { useDbInit } from '../db/client/db-hooks';
 import { useGraphStore } from '../graph/store/graph-store';
+import { useNodeTypeStore } from '../graph/store/node-type-store';
 import { useUIStore } from '../graph/store/ui-store';
 import { useDisplayMode } from './hooks/useDisplayMode';
 import { registerQueryMessageHandler } from '../db/client/query-message-handler';
@@ -11,6 +12,7 @@ export default function App() {
   const { ready, error: dbError } = useDbInit();
   const { displayMode } = useDisplayMode();
   const loadAll = useGraphStore((s) => s.loadAll);
+  const loadTypes = useNodeTypeStore((s) => s.loadTypes);
   const setDisplayMode = useUIStore((s) => s.setDisplayMode);
 
   useEffect(() => {
@@ -20,9 +22,10 @@ export default function App() {
   useEffect(() => {
     if (ready) {
       loadAll();
+      loadTypes();
       return registerQueryMessageHandler();
     }
-  }, [ready, loadAll]);
+  }, [ready, loadAll, loadTypes]);
 
   if (dbError) {
     return (

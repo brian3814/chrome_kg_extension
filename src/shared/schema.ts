@@ -22,7 +22,7 @@ export const extractionResultSchema = z.object({
 // Node input validation
 export const createNodeInputSchema = z.object({
   label: z.string().min(1, 'Label is required'),
-  type: z.string().min(1).default('entity'),
+  type: z.string().min(1).default('concept'),
   properties: z.record(z.string(), z.unknown()).optional().default({}),
   color: z.string().optional(),
   size: z.number().positive().optional().default(1.0),

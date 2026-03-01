@@ -1,7 +1,7 @@
 import React from 'react';
 import { useGraphStore } from '../../../graph/store/graph-store';
 import { useUIStore } from '../../../graph/store/ui-store';
-import { NODE_TYPE_COLORS } from '../../../shared/constants';
+import { useNodeTypeStore } from '../../../graph/store/node-type-store';
 import type { ResultNode } from '../../../db/worker/query-engine/types';
 
 interface QueryResultsProps {
@@ -14,6 +14,7 @@ interface QueryResultsProps {
 export function QueryResults({ results }: QueryResultsProps) {
   const selectNode = useGraphStore((s) => s.selectNode);
   const setActivePanel = useUIStore((s) => s.setActivePanel);
+  const getColorForType = useNodeTypeStore((s) => s.getColorForType);
 
   const handleSelect = (id: string) => {
     selectNode(id);
@@ -31,7 +32,7 @@ export function QueryResults({ results }: QueryResultsProps) {
       </p>
       <div className="space-y-1">
         {results.results.map((node, i) => (
-          <ResultNodeItem key={`${node.data.id ?? i}`} node={node} onSelect={handleSelect} depth={0} />
+          <ResultNodeItem key={`${node.data.id ?? i}`} node={node} onSelect={handleSelect} getColor={getColorForType} depth={0} />
         ))}
       </div>
     </div>
@@ -41,15 +42,17 @@ export function QueryResults({ results }: QueryResultsProps) {
 function ResultNodeItem({
   node,
   onSelect,
+  getColor,
   depth,
 }: {
   node: ResultNode;
   onSelect: (id: string) => void;
+  getColor: (type: string) => string;
   depth: number;
 }) {
   const nodeId = node.data.id as string | undefined;
   const label = (node.data.label as string) || node.type;
-  const color = NODE_TYPE_COLORS[node.type] || NODE_TYPE_COLORS.entity;
+  const color = getColor(node.type);
   const relEntries = Object.entries(node.relationship);
 
   return (
@@ -72,6 +75,7 @@ function ResultNodeItem({
             key={`${relKey}-${child.data.id ?? j}`}
             node={child}
             onSelect={onSelect}
+            getColor={getColor}
             depth={depth + 1}
           />
         ))

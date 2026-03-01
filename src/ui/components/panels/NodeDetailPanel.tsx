@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useGraphStore } from '../../../graph/store/graph-store';
 import { useUIStore } from '../../../graph/store/ui-store';
 import { PropertyEditor } from './PropertyEditor';
-import { NODE_TYPE_COLORS } from '../../../shared/constants';
+import { useNodeTypeStore } from '../../../graph/store/node-type-store';
 
 export function NodeDetailPanel() {
   const selectedNodeId = useGraphStore((s) => s.selectedNodeId);
@@ -12,6 +12,8 @@ export function NodeDetailPanel() {
   const deleteNode = useGraphStore((s) => s.deleteNode);
   const selectEdge = useGraphStore((s) => s.selectEdge);
   const setActivePanel = useUIStore((s) => s.setActivePanel);
+  const nodeTypesList = useNodeTypeStore((s) => s.types);
+  const getColorForType = useNodeTypeStore((s) => s.getColorForType);
 
   const node = nodes.find((n) => n.id === selectedNodeId);
   const connectedEdges = edges.filter(
@@ -52,7 +54,7 @@ export function NodeDetailPanel() {
     }
   };
 
-  const color = node.color || NODE_TYPE_COLORS[node.type] || NODE_TYPE_COLORS.entity;
+  const color = node.color || getColorForType(node.type);
 
   return (
     <div className="p-4 space-y-4">
@@ -101,11 +103,19 @@ export function NodeDetailPanel() {
 
         <Field label="Type">
           {editing ? (
-            <input
+            <select
               value={type}
               onChange={(e) => setType(e.target.value)}
               className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-sm text-zinc-100 outline-none focus:border-indigo-500"
-            />
+            >
+              {nodeTypesList.map((t) => (
+                <option key={t.type} value={t.type}>{t.type}</option>
+              ))}
+              {/* Keep current type selectable even if not in ontology */}
+              {!nodeTypesList.some((t) => t.type === type) && (
+                <option value={type}>{type}</option>
+              )}
+            </select>
           ) : (
             <span className="text-sm text-zinc-200 capitalize">{node.type}</span>
           )}

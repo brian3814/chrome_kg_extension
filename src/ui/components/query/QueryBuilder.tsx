@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { nodes as dbNodes } from '../../../db/client/db-client';
+import { nodeTypes as dbNodeTypes } from '../../../db/client/db-client';
 
 const OPERATORS = ['=', '!=', '>', '>=', '<', '<=', 'LIKE', 'IN', 'IS NULL'] as const;
 type Operator = typeof OPERATORS[number];
@@ -45,10 +45,10 @@ export function QueryBuilder({ onQueryReady, initialState }: QueryBuilderProps) 
   const [limit, setLimit] = useState(initialState?.limit ?? '25');
   const [optionsOpen, setOptionsOpen] = useState(false);
 
-  // Load node types
+  // Load node types from ontology
   useEffect(() => {
-    dbNodes.getTypes().then((types) => {
-      setNodeTypes(types);
+    dbNodeTypes.getAll().then((types) => {
+      setNodeTypes(types.map((t: { type: string }) => t.type));
     }).catch(() => {});
   }, []);
 

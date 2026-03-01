@@ -67,9 +67,14 @@ CREATE TABLE IF NOT EXISTS schema_version (
 CREATE TABLE IF NOT EXISTS ontology_node_types (
     type              TEXT PRIMARY KEY,
     description       TEXT,
+    color             TEXT,
     parent_type       TEXT REFERENCES ontology_node_types(type),
     properties_schema TEXT
 );
+
+INSERT OR IGNORE INTO ontology_node_types (type, description, color) VALUES
+    ('resource', 'A document, URL, file, or other information resource', '#059669'),
+    ('concept', 'An idea, topic, category, or abstract concept', '#7C3AED');
 
 CREATE TABLE IF NOT EXISTS ontology_edge_types (
     type              TEXT PRIMARY KEY,

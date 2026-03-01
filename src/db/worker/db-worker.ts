@@ -5,6 +5,7 @@ import { runMigrations } from './migrations';
 import { executeQuery, executeExec } from './query-executor';
 import * as nodeQueries from './queries/node-queries';
 import * as edgeQueries from './queries/edge-queries';
+import * as nodeTypeQueries from './queries/node-type-queries';
 import { executeGraphQuery, executeGraphMutation } from './query-engine';
 
 export type WorkerRequest = {
@@ -152,6 +153,25 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
       case 'edges.getBetween': {
         ensureInit();
         result = await edgeQueries.getEdgesBetween(params as string[]);
+        break;
+      }
+
+      // Node type operations
+      case 'nodeTypes.getAll': {
+        ensureInit();
+        result = await nodeTypeQueries.getAllNodeTypes();
+        break;
+      }
+
+      case 'nodeTypes.create': {
+        ensureInit();
+        result = await nodeTypeQueries.createNodeType(params as any);
+        break;
+      }
+
+      case 'nodeTypes.delete': {
+        ensureInit();
+        result = await nodeTypeQueries.deleteNodeType(params as string);
         break;
       }
 

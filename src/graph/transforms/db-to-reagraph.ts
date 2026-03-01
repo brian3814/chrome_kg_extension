@@ -1,5 +1,5 @@
 import type { GraphNode, GraphEdge } from '../../shared/types';
-import { NODE_TYPE_COLORS } from '../../shared/constants';
+import { FALLBACK_TYPE_COLOR } from '../../shared/constants';
 
 // Reagraph node format
 export interface ReagraphNode {
@@ -20,11 +20,14 @@ export interface ReagraphEdge {
   data?: Record<string, unknown>;
 }
 
-export function graphNodesToReagraph(nodes: GraphNode[]): ReagraphNode[] {
+export function graphNodesToReagraph(
+  nodes: GraphNode[],
+  typeColorMap?: Map<string, string>
+): ReagraphNode[] {
   return nodes.map((node) => ({
     id: node.id,
     label: node.label,
-    fill: node.color || NODE_TYPE_COLORS[node.type] || NODE_TYPE_COLORS.entity,
+    fill: node.color || typeColorMap?.get(node.type) || FALLBACK_TYPE_COLOR,
     size: node.size,
     data: {
       type: node.type,
@@ -52,12 +55,16 @@ export function graphEdgesToReagraph(edges: GraphEdge[]): ReagraphEdge[] {
   }));
 }
 
-export function graphDataToReagraph(nodes: GraphNode[], edges: GraphEdge[]): {
+export function graphDataToReagraph(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  typeColorMap?: Map<string, string>
+): {
   nodes: ReagraphNode[];
   edges: ReagraphEdge[];
 } {
   return {
-    nodes: graphNodesToReagraph(nodes),
+    nodes: graphNodesToReagraph(nodes, typeColorMap),
     edges: graphEdgesToReagraph(edges),
   };
 }
