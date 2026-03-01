@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useGraphStore } from '../../../graph/store/graph-store';
 import { useUIStore } from '../../../graph/store/ui-store';
 import { PropertyEditor } from './PropertyEditor';
@@ -16,8 +16,9 @@ export function NodeDetailPanel() {
   const getColorForType = useNodeTypeStore((s) => s.getColorForType);
 
   const node = nodes.find((n) => n.id === selectedNodeId);
-  const connectedEdges = edges.filter(
-    (e) => e.sourceId === selectedNodeId || e.targetId === selectedNodeId
+  const connectedEdges = useMemo(
+    () => edges.filter((e) => e.sourceId === selectedNodeId || e.targetId === selectedNodeId),
+    [edges, selectedNodeId]
   );
 
   const [editing, setEditing] = useState(false);

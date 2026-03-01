@@ -12,6 +12,7 @@ export default function App() {
   const { ready, error: dbError } = useDbInit();
   const { displayMode } = useDisplayMode();
   const loadAll = useGraphStore((s) => s.loadAll);
+  const startSyncListener = useGraphStore((s) => s.startSyncListener);
   const loadTypes = useNodeTypeStore((s) => s.loadTypes);
   const setDisplayMode = useUIStore((s) => s.setDisplayMode);
 
@@ -23,9 +24,14 @@ export default function App() {
     if (ready) {
       loadAll();
       loadTypes();
-      return registerQueryMessageHandler();
+      const cleanupSync = startSyncListener();
+      const cleanupQuery = registerQueryMessageHandler();
+      return () => {
+        cleanupSync();
+        cleanupQuery();
+      };
     }
-  }, [ready, loadAll, loadTypes]);
+  }, [ready, loadAll, loadTypes, startSyncListener]);
 
   if (dbError) {
     return (

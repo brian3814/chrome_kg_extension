@@ -13,7 +13,8 @@ type WorkerResponse = {
 
 const DB_REQUEST_TIMEOUT_MS = 10_000;
 
-let worker: Worker | null = null;
+let sharedWorker: SharedWorker | null = null;
+let port: MessagePort | null = null;
 const pendingRequests = new Map<
   string,
   { resolve: (data: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
@@ -30,15 +31,16 @@ export function initDbClient(): Promise<void> {
 
   initPromise = new Promise((resolve, reject) => {
     try {
-      // Use a direct URL to avoid Vite's blob: URL wrapping,
-      // which is blocked by Chrome extension CSP.
-      const workerUrl = new URL('/db-worker.js', location.origin).href;
-      worker = new Worker(workerUrl, { type: 'module' });
+      // Use SharedWorker so all tabs/panels share a single SQLite handle.
+      // This prevents OPFS corruption from concurrent Dedicated Workers.
+      const workerUrl = new URL('/db-shared-worker.js', location.origin).href;
+      sharedWorker = new SharedWorker(workerUrl, { type: 'module' });
+      port = sharedWorker.port;
 
-      worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+      port.onmessage = (event: MessageEvent<WorkerResponse>) => {
         const { requestId, success, data, error } = event.data;
 
-        // Handle the initial worker-loaded signal
+        // Handle the initial worker-connected signal
         if (requestId === '__init__') {
           return;
         }
@@ -56,14 +58,16 @@ export function initDbClient(): Promise<void> {
         }
       };
 
-      worker.onerror = (event) => {
-        console.error('[DB Client] Worker error:', event);
-        reject(new Error('DB Worker failed to load'));
+      sharedWorker.onerror = (event) => {
+        console.error('[DB Client] SharedWorker error:', event);
+        reject(new Error('DB SharedWorker failed to load'));
       };
+
+      port.start();
 
       // Send init command
       sendRequest('init').then(() => {
-        console.log('[DB Client] Database initialized');
+        console.log('[DB Client] Database initialized via SharedWorker');
         resolve();
       }).catch(reject);
     } catch (e) {
@@ -76,8 +80,8 @@ export function initDbClient(): Promise<void> {
 
 function sendRequest(action: string, params?: unknown): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    if (!worker) {
-      reject(new Error('DB Worker not initialized'));
+    if (!port) {
+      reject(new Error('DB SharedWorker not initialized'));
       return;
     }
 
@@ -91,7 +95,7 @@ function sendRequest(action: string, params?: unknown): Promise<unknown> {
     pendingRequests.set(requestId, { resolve, reject, timer });
 
     const request: WorkerRequest = { requestId, action, params };
-    worker.postMessage(request);
+    port.postMessage(request);
   });
 }
 

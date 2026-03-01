@@ -72,6 +72,42 @@ function dbWorkerPlugin(): Plugin {
   };
 }
 
+// Plugin to build the db-shared-worker as a separate self-contained ES module.
+// SharedWorker ensures only one SQLite handle exists across all tabs/panels.
+function dbSharedWorkerPlugin(): Plugin {
+  return {
+    name: 'db-shared-worker-build',
+    apply: 'build',
+    closeBundle: async () => {
+      await viteBuild({
+        configFile: false,
+        base: '',
+        resolve: {
+          alias: {
+            '@': resolve(__dirname, 'src'),
+          },
+        },
+        build: {
+          outDir: resolve(__dirname, 'dist'),
+          emptyOutDir: false,
+          sourcemap: false,
+          rollupOptions: {
+            input: {
+              'db-shared-worker': resolve(__dirname, 'src/db/worker/db-shared-worker.ts'),
+            },
+            output: {
+              entryFileNames: 'db-shared-worker.js',
+              assetFileNames: '[name][extname]',
+              chunkFileNames: 'assets/[name].js',
+              manualChunks: undefined,
+            },
+          },
+        },
+      });
+    },
+  };
+}
+
 // Plugin to move the HTML file and fix asset paths.
 // Vite outputs src/ui/index.html -> dist/src/ui/index.html.
 // We move it to dist/index.html and fix the asset paths.
@@ -99,7 +135,7 @@ function fixHtmlPlugin(): Plugin {
 
 export default defineConfig({
   base: '',
-  plugins: [react(), tailwindcss(), fixHtmlPlugin(), dbWorkerPlugin(), contentScriptPlugin()],
+  plugins: [react(), tailwindcss(), fixHtmlPlugin(), dbWorkerPlugin(), dbSharedWorkerPlugin(), contentScriptPlugin()],
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
