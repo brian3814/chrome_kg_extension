@@ -482,3 +482,66 @@ script-src 'self' 'wasm-unsafe-eval'; object-src 'self'
 - Remote script sources
 
 This CSP is the root cause of the most complex pitfalls in this project. Any library that creates inline workers via blob URLs will fail silently in this environment.
+
+---
+
+### Pitfall #11: OPFS `createSyncAccessHandle()` Fails in SharedWorker
+
+**Problem:** After migrating the DB worker from a Dedicated Worker to a SharedWorker (for multi-tab safety), `sqlite3.open_v2()` fails with `Error: unable to open database file`. The OPFS VFS *registers* without error, but fails at open time when SQLite internally calls `xOpen`/`xLock`.
+
+**Root cause:** `OriginPrivateFileSystemVFS` uses `FileSystemFileHandle.createSyncAccessHandle()` internally for WAL/journal files and exclusive locks. This API is restricted to dedicated workers in Chrome — calling it from a SharedWorker throws `InvalidStateError: createSyncAccessHandle is only supported in dedicated workers`. Since the VFS registered successfully, the original fallback logic (which only caught registration errors) never tried the IDB VFS.
+
+Two bugs in the original `initSQLite()` made this worse:
+
+1. **`await vfs.isReady` was a no-op** — Neither `OriginPrivateFileSystemVFS` nor `IDBBatchAtomicVFS` has an `isReady` property (only `AccessHandlePoolVFS` does). `await undefined` resolves silently, so the OPFS VFS appeared to register successfully in all contexts.
+
+2. **`open_v2` was outside the VFS try/catch** — VFS registration succeeded (it just sets up the VFS object), but the actual filesystem calls happen during `open_v2`. Since `open_v2` was below the try/catch blocks, its `SQLITE_CANTOPEN` error was unrecoverable and the IDB fallback was never attempted.
+
+**Solution:** Two changes in `sqlite-engine.ts`:
+
+1. **Probe `createSyncAccessHandle()` before registering the OPFS VFS:**
+
+```typescript
+async function isOPFSAvailable(): Promise<boolean> {
+  try {
+    const root = await navigator.storage.getDirectory();
+    const testFile = '.kg_opfs_probe';
+    const handle = await root.getFileHandle(testFile, { create: true });
+    const access = await handle.createSyncAccessHandle();
+    access.close();
+    await root.removeEntry(testFile);
+    return true;
+  } catch {
+    return false;
+  }
+}
+```
+
+2. **Move `open_v2` inside each VFS try/catch** so open-time failures trigger the next fallback:
+
+```typescript
+// Try OPFS (only if probe passed)
+if (await isOPFSAvailable()) {
+  try {
+    const vfs = new OriginPrivateFileSystemVFS();
+    sqlite3.vfs_register(vfs, true);
+    db = await sqlite3.open_v2(DB_NAME);          // <-- inside try/catch
+  } catch (e) { db = null; }
+}
+
+// Fall back to IDB
+if (db === null) {
+  try {
+    const vfs = new IDBBatchAtomicVFS();
+    sqlite3.vfs_register(vfs, true);
+    db = await sqlite3.open_v2(DB_NAME);          // <-- inside try/catch
+  } catch (e) { db = null; }
+}
+
+// Last resort: in-memory
+if (db === null) {
+  db = await sqlite3.open_v2(DB_NAME);
+}
+```
+
+**Key invariant:** The VFS fallback chain must always include `open_v2` inside each try/catch. Never separate VFS registration from database opening — registration can succeed even when the underlying filesystem API is unavailable in the current worker context.

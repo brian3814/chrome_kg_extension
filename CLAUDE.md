@@ -23,7 +23,7 @@ Five execution contexts, each with different capabilities:
 
 - **Service Worker** (`src/service-worker/`) — Ephemeral message router. No DOM. Registers context menus, manages side panel behavior, routes messages between contexts. Must not use dynamic imports (Vite's modulePreload polyfill references `document`).
 - **Side Panel / Tab** (`src/ui/`) — React 19 SPA. Same `index.html` serves both. Renders graph via Reagraph, manages state via Zustand stores in `src/graph/store/`.
-- **DB Web Worker** (`src/db/worker/`) — Dedicated worker running wa-sqlite with OPFS VFS. All SQLite calls go through a serial promise queue (`sqlite-engine.ts:serialize()`) to prevent Asyncify WASM corruption from concurrent operations.
+- **DB SharedWorker** (`src/db/worker/`) — SharedWorker running wa-sqlite with IDB VFS (OPFS is unavailable in SharedWorkers — see Pitfall #11 in `ARCHITECTURE.md`). All SQLite calls go through a serial promise queue (`sqlite-engine.ts:serialize()`) to prevent Asyncify WASM corruption from concurrent operations.
 - **Offscreen Document** (`src/offscreen/`) — Hidden page for long-running LLM streaming calls that outlive the service worker's 30s/5min lifecycle.
 - **Content Script** (`src/content-script/`) — Extracts page text via @mozilla/readability. Built as IIFE (separate Vite build pass).
 
@@ -49,7 +49,7 @@ The CSP `script-src 'self' 'wasm-unsafe-eval'` blocks all `blob:` URLs. This aff
 
 ## Database Layer
 
-`src/db/worker/sqlite-engine.ts` — Core SQLite wrapper. All operations serialized through a promise queue to prevent wa-sqlite Asyncify corruption. VFS fallback: OPFS → IDB → in-memory.
+`src/db/worker/sqlite-engine.ts` — Core SQLite wrapper. All operations serialized through a promise queue to prevent wa-sqlite Asyncify corruption. VFS fallback: OPFS → IDB → in-memory. **Important:** `open_v2` must be inside each VFS try/catch — never separate VFS registration from database opening (see Pitfall #11 in `ARCHITECTURE.md`).
 
 `src/db/worker/migrations/` — Versioned migrations. FTS5 is detected at runtime via `pragma_module_list` (not compiled into default wa-sqlite WASM). Migration 002 (FTS index) is optional; search falls back to LIKE queries.
 

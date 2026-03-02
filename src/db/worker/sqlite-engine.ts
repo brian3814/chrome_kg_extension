@@ -21,37 +21,69 @@ function serialize<T>(fn: () => Promise<T>): Promise<T> {
   return result;
 }
 
+/**
+ * Probe whether createSyncAccessHandle() works in this worker context.
+ * OriginPrivateFileSystemVFS relies on it internally, but the API is
+ * restricted to dedicated workers in many Chrome versions — SharedWorkers
+ * and service workers will throw.
+ */
+async function isOPFSAvailable(): Promise<boolean> {
+  try {
+    const root = await navigator.storage.getDirectory();
+    const testFile = '.kg_opfs_probe';
+    const handle = await root.getFileHandle(testFile, { create: true });
+    const access = await (handle as any).createSyncAccessHandle();
+    access.close();
+    await root.removeEntry(testFile);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function initSQLite(): Promise<void> {
   if (sqlite3 && db !== null) return;
 
   const module = await SQLiteESMFactory();
   sqlite3 = SQLite.Factory(module);
 
-  // Try OPFS VFS first, fall back to IDB VFS
-  try {
-    const vfs = new OriginPrivateFileSystemVFS();
-    await vfs.isReady;
-    sqlite3.vfs_register(vfs, true);
-    console.log('[DB] OPFS VFS registered');
-  } catch (e) {
-    console.warn('[DB] OPFS VFS not available, trying IDB VFS:', e);
+  // Try OPFS VFS first (only if createSyncAccessHandle works)
+  if (await isOPFSAvailable()) {
+    try {
+      const vfs = new OriginPrivateFileSystemVFS();
+      sqlite3.vfs_register(vfs, true);
+      db = await sqlite3.open_v2(DB_NAME);
+      console.log('[DB] SQLite initialized with OPFS VFS');
+    } catch (e) {
+      console.warn('[DB] OPFS VFS open failed, falling back:', e);
+      db = null;
+    }
+  } else {
+    console.log('[DB] OPFS not available in this worker context, skipping');
+  }
+
+  // Fall back to IDB VFS
+  if (db === null) {
     try {
       const vfs = new IDBBatchAtomicVFS();
-      await vfs.isReady;
       sqlite3.vfs_register(vfs, true);
-      console.log('[DB] IDB VFS registered');
-    } catch (e2) {
-      console.warn('[DB] IDB VFS not available, using default VFS:', e2);
+      db = await sqlite3.open_v2(DB_NAME);
+      console.log('[DB] SQLite initialized with IDB (IndexedDB) VFS');
+    } catch (e) {
+      console.warn('[DB] IDB VFS open failed, falling back to in-memory:', e);
+      db = null;
     }
   }
 
-  db = await sqlite3.open_v2(DB_NAME);
+  // Last resort: default in-memory VFS
+  if (db === null) {
+    db = await sqlite3.open_v2(DB_NAME);
+    console.warn('[DB] SQLite initialized with default (in-memory) VFS — data will not persist');
+  }
 
-  // Configure pragmas via exec (not serialized — nothing else is running yet)
+  // Configure pragmas (not serialized — nothing else is running yet)
   await sqlite3.exec(db, 'PRAGMA journal_mode = WAL;');
   await sqlite3.exec(db, 'PRAGMA foreign_keys = ON;');
-
-  console.log('[DB] SQLite initialized');
 }
 
 /**
