@@ -1,12 +1,81 @@
-import { executeLLMRequest } from './llm-executor';
+import { executeLLMRequestStreaming } from './llm-executor';
+
+// Chunk buffer to reduce IPC overhead
+class ChunkBuffer {
+  private buffer = '';
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private readonly maxBytes: number;
+  private readonly maxMs: number;
+  private readonly flush: (text: string) => void;
+
+  constructor(opts: { maxBytes: number; maxMs: number; flush: (text: string) => void }) {
+    this.maxBytes = opts.maxBytes;
+    this.maxMs = opts.maxMs;
+    this.flush = opts.flush;
+  }
+
+  add(text: string) {
+    this.buffer += text;
+    if (this.buffer.length >= this.maxBytes) {
+      this.drain();
+    } else if (!this.timer) {
+      this.timer = setTimeout(() => this.drain(), this.maxMs);
+    }
+  }
+
+  drain() {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    if (this.buffer.length > 0) {
+      const text = this.buffer;
+      this.buffer = '';
+      this.flush(text);
+    }
+  }
+}
 
 // Listen for messages from the service worker
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'LLM_REQUEST') {
-    executeLLMRequest(message.payload)
-      .then(sendResponse)
-      .catch((e) => sendResponse({ content: '', error: e.message }));
-    return true; // Keep channel open for async
+    const requestId = message.requestId ?? crypto.randomUUID();
+
+    // Acknowledge immediately — do NOT return true
+    sendResponse({ acknowledged: true, requestId });
+
+    // Stream in background
+    const buffer = new ChunkBuffer({
+      maxBytes: 100,
+      maxMs: 50,
+      flush: (text) => {
+        chrome.runtime.sendMessage({
+          type: 'LLM_STREAM_CHUNK',
+          payload: { requestId, chunk: text, done: false },
+        }).catch(() => {});
+      },
+    });
+
+    executeLLMRequestStreaming(message.payload, (chunk, done) => {
+      if (done) return; // handled below in .then()
+      buffer.add(chunk);
+    })
+      .then(({ content }) => {
+        buffer.drain();
+        chrome.runtime.sendMessage({
+          type: 'LLM_STREAM_CHUNK',
+          payload: { requestId, chunk: '', done: true, content },
+        }).catch(() => {});
+      })
+      .catch((e) => {
+        buffer.drain();
+        chrome.runtime.sendMessage({
+          type: 'LLM_STREAM_CHUNK',
+          payload: { requestId, chunk: '', done: true, error: e.message },
+        }).catch(() => {});
+      });
+
+    return false; // Channel already closed via sendResponse
   }
 
   if (message.type === 'KEEPALIVE') {

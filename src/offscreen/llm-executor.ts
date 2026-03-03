@@ -20,28 +20,26 @@ Rules:
 - Ensure all edges reference entities that exist in the nodes array
 - Return ONLY valid JSON, no other text`;
 
-export async function executeLLMRequest(
-  payload: LLMRequestMessage['payload']
-): Promise<{ content: string; error?: string }> {
+export async function executeLLMRequestStreaming(
+  payload: LLMRequestMessage['payload'],
+  onChunk: (text: string, done: boolean) => void
+): Promise<{ content: string }> {
   const { provider, model, apiKey, prompt } = payload;
 
-  try {
-    if (provider === 'openai') {
-      return await callOpenAI(apiKey, model, prompt);
-    } else if (provider === 'anthropic') {
-      return await callAnthropic(apiKey, model, prompt);
-    } else {
-      return { content: '', error: `Unknown provider: ${provider}` };
-    }
-  } catch (e: any) {
-    return { content: '', error: e.message };
+  if (provider === 'openai') {
+    return await streamOpenAI(apiKey, model, prompt, onChunk);
+  } else if (provider === 'anthropic') {
+    return await streamAnthropic(apiKey, model, prompt, onChunk);
+  } else {
+    throw new Error(`Unknown provider: ${provider}`);
   }
 }
 
-async function callOpenAI(
+async function streamOpenAI(
   apiKey: string,
   model: string,
-  userPrompt: string
+  userPrompt: string,
+  onChunk: (text: string, done: boolean) => void
 ): Promise<{ content: string }> {
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -57,6 +55,7 @@ async function callOpenAI(
       ],
       temperature: 0.1,
       response_format: { type: 'json_object' },
+      stream: true,
     }),
   });
 
@@ -65,14 +64,47 @@ async function callOpenAI(
     throw new Error(`OpenAI API error (${response.status}): ${error}`);
   }
 
-  const data = await response.json();
-  return { content: data.choices[0]?.message?.content ?? '' };
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let accumulated = '';
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop()!; // keep incomplete line in buffer
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith('data: ')) continue;
+      const data = trimmed.slice(6);
+      if (data === '[DONE]') continue;
+
+      try {
+        const parsed = JSON.parse(data);
+        const delta = parsed.choices?.[0]?.delta?.content;
+        if (delta) {
+          accumulated += delta;
+          onChunk(delta, false);
+        }
+      } catch {
+        // skip malformed JSON lines
+      }
+    }
+  }
+
+  onChunk('', true);
+  return { content: accumulated };
 }
 
-async function callAnthropic(
+async function streamAnthropic(
   apiKey: string,
   model: string,
-  userPrompt: string
+  userPrompt: string,
+  onChunk: (text: string, done: boolean) => void
 ): Promise<{ content: string }> {
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -89,6 +121,7 @@ async function callAnthropic(
       messages: [
         { role: 'user', content: `Extract entities and relationships from the following text:\n\n${userPrompt}` },
       ],
+      stream: true,
     }),
   });
 
@@ -97,7 +130,36 @@ async function callAnthropic(
     throw new Error(`Anthropic API error (${response.status}): ${error}`);
   }
 
-  const data = await response.json();
-  const textBlock = data.content?.find((b: any) => b.type === 'text');
-  return { content: textBlock?.text ?? '' };
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let accumulated = '';
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop()!;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith('data: ')) continue;
+      const data = trimmed.slice(6);
+
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+          accumulated += parsed.delta.text;
+          onChunk(parsed.delta.text, false);
+        }
+      } catch {
+        // skip malformed JSON lines
+      }
+    }
+  }
+
+  onChunk('', true);
+  return { content: accumulated };
 }

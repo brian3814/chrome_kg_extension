@@ -168,6 +168,28 @@ export interface NodeType {
   color: string | null;
 }
 
+// Agent step types
+export type AgentStepStatus = 'pending' | 'running' | 'completed' | 'error';
+
+export interface AgentStep {
+  id: string;
+  label: string;
+  status: AgentStepStatus;
+  startedAt?: number;
+  completedAt?: number;
+  error?: string;
+  output?: string;
+}
+
+export interface AgentRun {
+  id: string;
+  steps: AgentStep[];
+  currentStepIndex: number;
+  status: 'running' | 'completed' | 'error';
+  startedAt: number;
+  completedAt?: number;
+}
+
 // Display mode
 export type DisplayMode = 'sidePanel' | 'tab';
 

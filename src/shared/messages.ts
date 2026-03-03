@@ -83,6 +83,8 @@ export interface LLMStreamChunkMessage extends ExtensionMessage {
     requestId: string;
     chunk: string;
     done: boolean;
+    content?: string;
+    error?: string;
   };
 }
 

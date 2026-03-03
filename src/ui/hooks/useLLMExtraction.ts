@@ -4,14 +4,49 @@ import { useGraphStore } from '../../graph/store/graph-store';
 import { extractionResultSchema } from '../../shared/schema';
 import type { DiffItem } from '../../shared/types';
 
+function streamFromOffscreen(
+  requestId: string,
+  onChunk: (text: string) => void
+): Promise<{ content?: string; error?: string }> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('LLM stream timed out after 120s'));
+    }, 120_000);
+
+    const listener = (message: any) => {
+      if (message.type !== 'LLM_STREAM_CHUNK' || message.payload?.requestId !== requestId) return;
+      const { chunk, done, content, error } = message.payload;
+      if (chunk) onChunk(chunk);
+      if (done) {
+        cleanup();
+        resolve({ content, error });
+      }
+    };
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      chrome.runtime.onMessage.removeListener(listener);
+    };
+
+    chrome.runtime.onMessage.addListener(listener);
+  });
+}
+
 export function useLLMExtraction() {
   const startExtraction = useCallback(async (text: string, sourceUrl?: string) => {
     const llm = useLLMStore.getState();
     llm.setInputText(text);
     llm.setSourceUrl(sourceUrl ?? null);
-    llm.setStatus('extracting');
-    llm.setStreamingOutput('');
     llm.setError(null);
+
+    // Start agent run with steps
+    const requestId = llm.startAgentRun([
+      { id: 'extract', label: 'Extracting entities via LLM' },
+      { id: 'parse', label: 'Parsing response' },
+    ]);
+
+    llm.setStatus('extracting');
 
     try {
       const result = await chrome.storage.local.get('llmConfig') as Record<string, any>;
@@ -20,8 +55,10 @@ export function useLLMExtraction() {
         throw new Error('No API key configured. Go to Settings to add one.');
       }
 
-      const response = await chrome.runtime.sendMessage({
+      // Send LLM_REQUEST with requestId — offscreen acks immediately
+      chrome.runtime.sendMessage({
         type: 'LLM_REQUEST',
+        requestId,
         payload: {
           provider: config.provider,
           model: config.model,
@@ -30,11 +67,24 @@ export function useLLMExtraction() {
         },
       });
 
-      if (response?.error) {
-        throw new Error(response.error);
+      // Listen for stream chunks
+      const streamResult = await streamFromOffscreen(requestId, (chunk) => {
+        useLLMStore.getState().appendToCurrentStep(chunk);
+      });
+
+      if (streamResult.error) {
+        throw new Error(streamResult.error);
       }
 
-      const content = response?.content ?? useLLMStore.getState().streamingOutput;
+      // Complete extract step, advance to parse step
+      useLLMStore.getState().completeCurrentStep();
+      useLLMStore.getState().advanceStep();
+
+      // Get the content from the stream result or from the step output
+      const content = streamResult.content
+        ?? useLLMStore.getState().agentRun?.steps[0]?.output
+        ?? '';
+
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         throw new Error('No JSON found in LLM response');
@@ -68,10 +118,14 @@ export function useLLMExtraction() {
         });
       }
 
+      // Complete parse step
+      useLLMStore.getState().completeCurrentStep();
       useLLMStore.getState().setDiff({ items });
-      useLLMStore.getState().setStatus('reviewing');
+      useLLMStore.getState().setStatus('extracted');
     } catch (e: any) {
-      useLLMStore.getState().setError(e.message);
+      const llmState = useLLMStore.getState();
+      llmState.failCurrentStep(e.message);
+      llmState.setError(e.message);
     }
   }, []);
 
@@ -143,5 +197,9 @@ export function useLLMExtraction() {
     }
   }, []);
 
-  return { startExtraction, applyDiff };
+  const proceedToReview = useCallback(() => {
+    useLLMStore.getState().setStatus('reviewing');
+  }, []);
+
+  return { startExtraction, applyDiff, proceedToReview };
 }

@@ -3,13 +3,95 @@ import { useLLMStore } from '../../../graph/store/llm-store';
 import { useLLMExtraction } from '../../hooks/useLLMExtraction';
 import { TextInput } from './TextInput';
 import { DiffView } from './DiffView';
+import { ExtractionSummary } from './ExtractionSummary';
+import { StreamingOutput } from './StreamingOutput';
+import type { AgentStep } from '../../../shared/types';
+
+function StepIcon({ status }: { status: AgentStep['status'] }) {
+  if (status === 'running') {
+    return (
+      <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+    );
+  }
+  if (status === 'completed') {
+    return (
+      <svg className="w-4 h-4 text-green-400 flex-shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M3 8.5l3.5 3.5 6.5-7" />
+      </svg>
+    );
+  }
+  if (status === 'error') {
+    return (
+      <svg className="w-4 h-4 text-red-400 flex-shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M4 4l8 8M12 4l-8 8" />
+      </svg>
+    );
+  }
+  // pending
+  return <div className="w-4 h-4 rounded-full border-2 border-zinc-600 flex-shrink-0" />;
+}
+
+function ElapsedTime({ step }: { step: AgentStep }) {
+  const [elapsed, setElapsed] = React.useState('');
+
+  React.useEffect(() => {
+    if (!step.startedAt) return;
+    if (step.completedAt) {
+      setElapsed(formatMs(step.completedAt - step.startedAt));
+      return;
+    }
+    // Running — update every second
+    const update = () => setElapsed(formatMs(Date.now() - step.startedAt!));
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [step.startedAt, step.completedAt, step.status]);
+
+  if (!elapsed) return null;
+  return <span className="text-xs text-zinc-500 ml-auto">{elapsed}</span>;
+}
+
+function formatMs(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remaining = seconds % 60;
+  return `${minutes}m ${remaining}s`;
+}
+
+function StepTimeline() {
+  const agentRun = useLLMStore((s) => s.agentRun);
+  if (!agentRun) return null;
+
+  const currentStep = agentRun.steps[agentRun.currentStepIndex];
+  const showOutput = currentStep?.status === 'running' && (currentStep.output?.length ?? 0) > 0;
+
+  return (
+    <div className="space-y-2">
+      {agentRun.steps.map((step) => (
+        <div key={step.id} className="flex items-center gap-2">
+          <StepIcon status={step.status} />
+          <span className={`text-sm ${step.status === 'running' ? 'text-zinc-200' : step.status === 'completed' ? 'text-zinc-400' : step.status === 'error' ? 'text-red-400' : 'text-zinc-500'}`}>
+            {step.label}
+          </span>
+          <ElapsedTime step={step} />
+        </div>
+      ))}
+      {showOutput && (
+        <StreamingOutput
+          text={currentStep.output ?? ''}
+          done={currentStep.status !== 'running'}
+        />
+      )}
+    </div>
+  );
+}
 
 export function LLMPanel() {
   const status = useLLMStore((s) => s.status);
   const error = useLLMStore((s) => s.error);
-  const streamingOutput = useLLMStore((s) => s.streamingOutput);
   const reset = useLLMStore((s) => s.reset);
-  const { startExtraction, applyDiff } = useLLMExtraction();
+  const { startExtraction, applyDiff, proceedToReview } = useLLMExtraction();
 
   return (
     <div className="p-4 space-y-4">
@@ -34,17 +116,9 @@ export function LLMPanel() {
       {status === 'idle' || status === 'error' ? (
         <TextInput onSubmit={startExtraction} />
       ) : status === 'extracting' ? (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-            <span className="text-sm text-zinc-400">Extracting entities...</span>
-          </div>
-          {streamingOutput && (
-            <pre className="text-xs text-zinc-500 bg-zinc-800 rounded p-3 overflow-x-auto max-h-[200px] overflow-y-auto whitespace-pre-wrap">
-              {streamingOutput}
-            </pre>
-          )}
-        </div>
+        <StepTimeline />
+      ) : status === 'extracted' ? (
+        <ExtractionSummary onProceed={proceedToReview} />
       ) : status === 'reviewing' ? (
         <DiffView onApply={applyDiff} />
       ) : status === 'merging' ? (

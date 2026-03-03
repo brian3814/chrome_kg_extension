@@ -7,6 +7,9 @@ export function handleMessage(
   sender: chrome.runtime.MessageSender,
   sendResponse: (response?: unknown) => void
 ): boolean {
+  // LLM_STREAM_CHUNK is broadcast by offscreen — SW should ignore it
+  if (message.type === 'LLM_STREAM_CHUNK') return false;
+
   // Handle async responses
   handleMessageAsync(message, sender).then(sendResponse).catch((e) => {
     console.error('[SW] Message handling error:', e);
@@ -35,7 +38,7 @@ async function handleMessageAsync(
     }
 
     case 'LLM_REQUEST': {
-      // Forward to offscreen document
+      // Forward to offscreen document — it acks immediately, then streams chunks via broadcast
       await ensureOffscreenDocument();
       const response = await chrome.runtime.sendMessage(message);
       return response;
