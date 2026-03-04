@@ -48,7 +48,7 @@ const MUTATION_ACTIONS = new Set([
   'nodes.create', 'nodes.update', 'nodes.delete',
   'edges.create', 'edges.update', 'edges.delete',
   'nodeTypes.create', 'nodeTypes.delete',
-  'mutation.execute', 'exec', 'reset',
+  'mutation.execute', 'exec', 'reset', 'clearAll',
 ]);
 
 async function handleAction(action: string, params: unknown): Promise<{ result: unknown; syncEvent?: SyncEvent }> {
@@ -67,6 +67,13 @@ async function handleAction(action: string, params: unknown): Promise<{ result: 
       await runMigrations();
       isInitialized = true;
       return { result: { ready: true }, syncEvent: { type: 'reset' } };
+    }
+
+    case 'clearAll': {
+      ensureInit();
+      await executeExec('DELETE FROM edges');
+      await executeExec('DELETE FROM nodes');
+      return { result: { success: true }, syncEvent: { type: 'reset' } };
     }
 
     case 'exec': {

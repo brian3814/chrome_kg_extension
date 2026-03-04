@@ -152,6 +152,10 @@ export const graph = {
   mutate: (mutation: unknown) => sendRequest('mutation.execute', mutation),
 };
 
+export function clearAll(): Promise<{ success: boolean }> {
+  return sendRequest('clearAll') as Promise<{ success: boolean }>;
+}
+
 export function isDbReady(): boolean {
   return initPromise !== null;
 }

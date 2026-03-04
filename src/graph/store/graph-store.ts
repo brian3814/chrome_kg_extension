@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { nodes as dbNodes, edges as dbEdges } from '../../db/client/db-client';
+import { nodes as dbNodes, edges as dbEdges, clearAll as dbClearAll } from '../../db/client/db-client';
 import type { GraphNode, GraphEdge, CreateNodeInput, UpdateNodeInput, CreateEdgeInput, UpdateEdgeInput, DbNode, DbEdge } from '../../shared/types';
 import { SYNC_CHANNEL, type SyncEvent } from '../../shared/sync-events';
 import { buildAdjacencyMap, type AdjacencyMap } from '../algorithms/adjacency';
@@ -55,6 +55,7 @@ interface GraphStore {
   createEdge: (input: CreateEdgeInput) => Promise<GraphEdge | null>;
   updateEdge: (input: UpdateEdgeInput) => Promise<GraphEdge | null>;
   deleteEdge: (id: string) => Promise<boolean>;
+  clearAll: () => Promise<boolean>;
   selectNode: (id: string | null) => void;
   selectEdge: (id: string | null) => void;
   clearSelection: () => void;
@@ -220,6 +221,23 @@ export const useGraphStore = create<GraphStore>((set, get) => ({
         });
       }
       return success;
+    } catch (e: any) {
+      set({ error: e.message });
+      return false;
+    }
+  },
+
+  clearAll: async () => {
+    try {
+      await dbClearAll();
+      set({
+        nodes: [],
+        edges: [],
+        adjacency: new Map(),
+        selectedNodeId: null,
+        selectedEdgeId: null,
+      });
+      return true;
     } catch (e: any) {
       set({ error: e.message });
       return false;
