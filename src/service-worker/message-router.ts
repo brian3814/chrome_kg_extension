@@ -7,8 +7,9 @@ export function handleMessage(
   sender: chrome.runtime.MessageSender,
   sendResponse: (response?: unknown) => void
 ): boolean {
-  // LLM_STREAM_CHUNK is broadcast by offscreen — SW should ignore it
+  // Broadcast messages from offscreen — SW should ignore them
   if (message.type === 'LLM_STREAM_CHUNK') return false;
+  if (message.type === 'AGENT_PROGRESS') return false;
 
   // Handle async responses
   handleMessageAsync(message, sender).then(sendResponse).catch((e) => {
@@ -60,6 +61,26 @@ async function handleMessageAsync(
       return { success: true };
     }
 
+    case 'AGENT_RUN_START': {
+      // Forward to offscreen document (same pattern as LLM_REQUEST)
+      await ensureOffscreenDocument();
+      const response = await chrome.runtime.sendMessage(message);
+      return response;
+    }
+
+    case 'TOOL_EXECUTE': {
+      // Relay to content script via tabs.sendMessage, return response
+      const { tabId } = (message as any).payload;
+      try {
+        // Ensure content script is injected (handles tabs opened before extension load)
+        await ensureContentScript(tabId);
+        const response = await chrome.tabs.sendMessage(tabId, message);
+        return response;
+      } catch (e: any) {
+        return { result: '', error: `Content script unreachable: ${e.message}` };
+      }
+    }
+
     case 'KEEPALIVE': {
       return { alive: true };
     }
@@ -76,5 +97,18 @@ async function handleMessageAsync(
     default:
       console.warn('[SW] Unknown message type:', message.type);
       return { error: 'Unknown message type' };
+  }
+}
+
+async function ensureContentScript(tabId: number): Promise<void> {
+  try {
+    // Ping the content script to see if it's already there
+    await chrome.tabs.sendMessage(tabId, { type: 'PING' });
+  } catch {
+    // Content script not present — inject it
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['content-script.js'],
+    });
   }
 }

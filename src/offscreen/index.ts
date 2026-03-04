@@ -1,4 +1,5 @@
 import { executeLLMRequestStreaming } from './llm-executor';
+import { runAgentLoop } from './agent-loop';
 
 // Chunk buffer to reduce IPC overhead
 class ChunkBuffer {
@@ -76,6 +77,44 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       });
 
     return false; // Channel already closed via sendResponse
+  }
+
+  if (message.type === 'AGENT_RUN_START') {
+    const { runId } = message.payload;
+    sendResponse({ acknowledged: true, runId });
+
+    const chunkBuffer = new ChunkBuffer({
+      maxBytes: 100,
+      maxMs: 50,
+      flush: (text) => {
+        chrome.runtime.sendMessage({
+          type: 'AGENT_PROGRESS',
+          payload: { runId, event: { type: 'llm_chunk', text } },
+        }).catch(() => {});
+      },
+    });
+
+    runAgentLoop({
+      runId,
+      userPrompt: message.payload.userPrompt,
+      tabId: message.payload.tabId,
+      apiKey: message.payload.apiKey,
+      model: message.payload.model,
+      maxIterations: message.payload.maxIterations,
+      onProgress: (event) => {
+        if (event.type === 'llm_chunk') {
+          chunkBuffer.add(event.text ?? '');
+        } else {
+          chunkBuffer.drain();
+          chrome.runtime.sendMessage({
+            type: 'AGENT_PROGRESS',
+            payload: { runId, event },
+          }).catch(() => {});
+        }
+      },
+    });
+
+    return false;
   }
 
   if (message.type === 'KEEPALIVE') {

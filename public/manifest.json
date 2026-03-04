@@ -8,9 +8,13 @@
     "sidePanel",
     "storage",
     "activeTab",
+    "scripting",
     "contextMenus",
     "offscreen",
     "readingList"
+  ],
+  "host_permissions": [
+    "<all_urls>"
   ],
   "action": {
     "default_title": "Knowledge Graph"

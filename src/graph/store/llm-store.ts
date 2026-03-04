@@ -1,17 +1,22 @@
 import { create } from 'zustand';
-import type { ExtractionDiff, AgentRun, AgentStep } from '../../shared/types';
+import type { ExtractionDiff, AgentRun, AgentStep, AgentTurn } from '../../shared/types';
 
-type ExtractionStatus = 'idle' | 'extracting' | 'extracted' | 'reviewing' | 'merging' | 'error';
+type ExtractionStatus = 'idle' | 'extracting' | 'extracted' | 'reviewing' | 'merging' | 'error' | 'agent-running';
+
+export type ExtractionTab = 'page' | 'text';
 
 interface LLMStore {
   status: ExtractionStatus;
+  activeTab: ExtractionTab;
   diff: ExtractionDiff | null;
   error: string | null;
   inputText: string;
   sourceUrl: string | null;
   agentRun: AgentRun | null;
+  agentTurns: AgentTurn[];
 
   setStatus: (status: ExtractionStatus) => void;
+  setActiveTab: (tab: ExtractionTab) => void;
   setDiff: (diff: ExtractionDiff | null) => void;
   setError: (error: string | null) => void;
   setInputText: (text: string) => void;
@@ -27,17 +32,25 @@ interface LLMStore {
   completeCurrentStep: () => void;
   failCurrentStep: (error: string) => void;
   appendToCurrentStep: (chunk: string) => void;
+
+  // Agent turn tracking (for page extraction)
+  addAgentTurn: (turn: AgentTurn) => void;
+  appendToLastTurn: (chunk: string) => void;
+  clearAgentTurns: () => void;
 }
 
 export const useLLMStore = create<LLMStore>((set, get) => ({
   status: 'idle',
+  activeTab: 'page' as ExtractionTab,
   diff: null,
   error: null,
   inputText: '',
   sourceUrl: null,
   agentRun: null,
+  agentTurns: [],
 
   setStatus: (status) => set({ status }),
+  setActiveTab: (tab) => set({ activeTab: tab }),
   setDiff: (diff) => set({ diff }),
   setError: (error) => set({ error, status: error ? 'error' : 'idle' }),
   setInputText: (text) => set({ inputText: text }),
@@ -75,6 +88,7 @@ export const useLLMStore = create<LLMStore>((set, get) => ({
       inputText: '',
       sourceUrl: null,
       agentRun: null,
+      agentTurns: [],
     }),
 
   startAgentRun: (stepDefs) => {
@@ -173,4 +187,20 @@ export const useLLMStore = create<LLMStore>((set, get) => ({
     };
     set({ agentRun: { ...run, steps } });
   },
+
+  addAgentTurn: (turn) => {
+    set((state) => ({ agentTurns: [...state.agentTurns, turn] }));
+  },
+
+  appendToLastTurn: (chunk) => {
+    set((state) => {
+      const turns = [...state.agentTurns];
+      if (turns.length === 0) return {};
+      const last = turns[turns.length - 1];
+      turns[turns.length - 1] = { ...last, content: last.content + chunk };
+      return { agentTurns: turns };
+    });
+  },
+
+  clearAgentTurns: () => set({ agentTurns: [] }),
 }));

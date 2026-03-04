@@ -2,10 +2,13 @@ import React from 'react';
 import { useLLMStore } from '../../../graph/store/llm-store';
 import { useLLMExtraction } from '../../hooks/useLLMExtraction';
 import { TextInput } from './TextInput';
+import { PromptInput } from './PromptInput';
+import { AgentTimeline } from './AgentTimeline';
 import { DiffView } from './DiffView';
 import { ExtractionSummary } from './ExtractionSummary';
 import { StreamingOutput } from './StreamingOutput';
 import type { AgentStep } from '../../../shared/types';
+import type { ExtractionTab } from '../../../graph/store/llm-store';
 
 function StepIcon({ status }: { status: AgentStep['status'] }) {
   if (status === 'running') {
@@ -87,11 +90,20 @@ function StepTimeline() {
   );
 }
 
+const TABS: { key: ExtractionTab; label: string }[] = [
+  { key: 'page', label: 'From Page' },
+  { key: 'text', label: 'From Text' },
+];
+
 export function LLMPanel() {
   const status = useLLMStore((s) => s.status);
+  const activeTab = useLLMStore((s) => s.activeTab);
+  const setActiveTab = useLLMStore((s) => s.setActiveTab);
   const error = useLLMStore((s) => s.error);
   const reset = useLLMStore((s) => s.reset);
-  const { startExtraction, applyDiff, proceedToReview } = useLLMExtraction();
+  const { startExtraction, startAgentExtraction, applyDiff, proceedToReview } = useLLMExtraction();
+
+  const isIdle = status === 'idle' || status === 'error';
 
   return (
     <div className="p-4 space-y-4">
@@ -107,14 +119,37 @@ export function LLMPanel() {
         )}
       </div>
 
+      {/* Tab toggle — only show when idle/error */}
+      {isIdle && (
+        <div className="flex gap-1 bg-zinc-800 rounded p-0.5">
+          {TABS.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex-1 text-xs py-1.5 rounded transition-colors ${
+                activeTab === tab.key
+                  ? 'bg-zinc-600 text-zinc-100'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {error && (
         <div className="bg-red-900/30 border border-red-800 rounded p-3">
           <p className="text-xs text-red-400">{error}</p>
         </div>
       )}
 
-      {status === 'idle' || status === 'error' ? (
+      {isIdle && activeTab === 'page' ? (
+        <PromptInput onSubmit={startAgentExtraction} />
+      ) : isIdle && activeTab === 'text' ? (
         <TextInput onSubmit={startExtraction} />
+      ) : status === 'agent-running' ? (
+        <AgentTimeline />
       ) : status === 'extracting' ? (
         <StepTimeline />
       ) : status === 'extracted' ? (

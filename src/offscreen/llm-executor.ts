@@ -1,4 +1,5 @@
 import type { LLMRequestMessage } from '../shared/messages';
+import type { ToolCall } from '../shared/types';
 
 const EXTRACTION_SYSTEM_PROMPT = `You are a knowledge graph extraction assistant. Given text, extract entities (nodes) and relationships (edges) and return them as structured JSON.
 
@@ -162,4 +163,126 @@ async function streamAnthropic(
 
   onChunk('', true);
   return { content: accumulated };
+}
+
+export interface AnthropicMessage {
+  role: 'user' | 'assistant';
+  content: string | AnthropicContentBlock[];
+}
+
+export type AnthropicContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean };
+
+export interface AnthropicToolsResult {
+  textContent: string;
+  toolCalls: ToolCall[];
+  stopReason: string;
+}
+
+export async function streamAnthropicWithTools(
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  messages: AnthropicMessage[],
+  tools: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>,
+  onTextChunk: (text: string) => void
+): Promise<AnthropicToolsResult> {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages,
+      tools,
+      stream: true,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Anthropic API error (${response.status}): ${error}`);
+  }
+
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let textContent = '';
+  const toolCalls: ToolCall[] = [];
+  let stopReason = 'end_turn';
+
+  // Track tool_use blocks being built
+  let currentToolId = '';
+  let currentToolName = '';
+  let currentToolInputJson = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop()!;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith('data: ')) continue;
+      const data = trimmed.slice(6);
+
+      try {
+        const parsed = JSON.parse(data);
+
+        switch (parsed.type) {
+          case 'content_block_start': {
+            if (parsed.content_block?.type === 'tool_use') {
+              currentToolId = parsed.content_block.id;
+              currentToolName = parsed.content_block.name;
+              currentToolInputJson = '';
+            }
+            break;
+          }
+          case 'content_block_delta': {
+            if (parsed.delta?.type === 'text_delta' && parsed.delta.text) {
+              textContent += parsed.delta.text;
+              onTextChunk(parsed.delta.text);
+            } else if (parsed.delta?.type === 'input_json_delta' && parsed.delta.partial_json) {
+              currentToolInputJson += parsed.delta.partial_json;
+            }
+            break;
+          }
+          case 'content_block_stop': {
+            if (currentToolId) {
+              let input: Record<string, unknown> = {};
+              try {
+                input = JSON.parse(currentToolInputJson || '{}');
+              } catch { /* default to empty */ }
+              toolCalls.push({ id: currentToolId, name: currentToolName, input });
+              currentToolId = '';
+              currentToolName = '';
+              currentToolInputJson = '';
+            }
+            break;
+          }
+          case 'message_delta': {
+            if (parsed.delta?.stop_reason) {
+              stopReason = parsed.delta.stop_reason;
+            }
+            break;
+          }
+        }
+      } catch {
+        // skip malformed JSON lines
+      }
+    }
+  }
+
+  return { textContent, toolCalls, stopReason };
 }

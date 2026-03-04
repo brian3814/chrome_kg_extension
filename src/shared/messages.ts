@@ -111,6 +111,49 @@ export interface ToggleDisplayModeMessage extends ExtensionMessage {
   payload: { currentMode: 'sidePanel' | 'tab' };
 }
 
+// Agent extraction messages
+export interface AgentRunStartMessage extends ExtensionMessage {
+  type: 'AGENT_RUN_START';
+  payload: {
+    runId: string;
+    userPrompt: string;
+    tabId: number;
+    provider: string;
+    model: string;
+    apiKey: string;
+    maxIterations?: number;
+  };
+}
+
+export interface ToolExecuteMessage extends ExtensionMessage {
+  type: 'TOOL_EXECUTE';
+  payload: {
+    runId: string;
+    toolCallId: string;
+    toolName: string;
+    toolInput: Record<string, unknown>;
+    tabId: number;
+  };
+}
+
+export interface ToolResultMessage extends ExtensionMessage {
+  type: 'TOOL_RESULT';
+  payload: {
+    runId: string;
+    toolCallId: string;
+    result: string;
+    error?: string;
+  };
+}
+
+export interface AgentProgressMessage extends ExtensionMessage {
+  type: 'AGENT_PROGRESS';
+  payload: {
+    runId: string;
+    event: import('./types').AgentProgressEvent;
+  };
+}
+
 // Keepalive for offscreen
 export interface KeepaliveMessage extends ExtensionMessage {
   type: 'KEEPALIVE';
@@ -145,7 +188,11 @@ export type RuntimeMessage =
   | ToggleDisplayModeMessage
   | KeepaliveMessage
   | QueryExecuteMessage
-  | MutationExecuteMessage;
+  | MutationExecuteMessage
+  | AgentRunStartMessage
+  | ToolExecuteMessage
+  | ToolResultMessage
+  | AgentProgressMessage;
 
 // Helper to create messages
 export function createMessage<T extends ExtensionMessage>(

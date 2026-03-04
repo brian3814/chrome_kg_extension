@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { useLLMStore } from '../../graph/store/llm-store';
 import { useGraphStore } from '../../graph/store/graph-store';
 import { extractionResultSchema } from '../../shared/schema';
-import type { DiffItem } from '../../shared/types';
+import type { DiffItem, AgentProgressEvent } from '../../shared/types';
 
 function streamFromOffscreen(
   requestId: string,
@@ -197,9 +197,132 @@ export function useLLMExtraction() {
     }
   }, []);
 
+  const startAgentExtraction = useCallback(async (prompt: string) => {
+    const llm = useLLMStore.getState();
+    llm.setError(null);
+    llm.clearAgentTurns();
+
+    // Get active tab
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = tabs[0];
+    if (!tab?.id) {
+      llm.setError('No active tab found');
+      return;
+    }
+
+    // Get LLM config
+    const result = await chrome.storage.local.get('llmConfig') as Record<string, any>;
+    const config = result.llmConfig;
+    if (!config?.apiKey) {
+      llm.setError('No API key configured. Go to Settings to add one.');
+      return;
+    }
+    if (config.provider !== 'anthropic') {
+      llm.setError('Page extraction requires an Anthropic API key. Configure one in Settings.');
+      return;
+    }
+
+    const runId = crypto.randomUUID();
+    llm.setStatus('agent-running');
+    llm.setSourceUrl(tab.url ?? null);
+
+    // Send AGENT_RUN_START
+    chrome.runtime.sendMessage({
+      type: 'AGENT_RUN_START',
+      payload: {
+        runId,
+        userPrompt: prompt,
+        tabId: tab.id,
+        provider: config.provider,
+        model: config.model,
+        apiKey: config.apiKey,
+      },
+    });
+
+    // Listen for AGENT_PROGRESS events
+    const listener = (message: any) => {
+      if (message.type !== 'AGENT_PROGRESS' || message.payload?.runId !== runId) return;
+
+      const event: AgentProgressEvent = message.payload.event;
+      const store = useLLMStore.getState();
+
+      switch (event.type) {
+        case 'llm_start':
+          store.addAgentTurn({ type: 'thinking', content: '' });
+          break;
+        case 'llm_chunk':
+          store.appendToLastTurn(event.text ?? '');
+          break;
+        case 'tool_call':
+          if (event.toolCall) {
+            store.addAgentTurn({
+              type: 'tool_call',
+              content: '',
+              toolName: event.toolCall.name,
+              toolInput: event.toolCall.input,
+            });
+          }
+          break;
+        case 'tool_result':
+          store.addAgentTurn({
+            type: 'tool_result',
+            content: event.toolResult ?? event.toolError ?? '',
+            toolName: event.toolCall?.name,
+          });
+          break;
+        case 'extraction_complete': {
+          chrome.runtime.onMessage.removeListener(listener);
+          if (event.extractionResult) {
+            const validated = extractionResultSchema.parse(event.extractionResult);
+            const graph = useGraphStore.getState();
+            const items: DiffItem[] = [];
+
+            for (const node of validated.nodes) {
+              const existing = graph.nodes.find(
+                (n) => n.label.toLowerCase() === node.label.toLowerCase()
+              );
+              items.push({
+                action: existing ? 'merge' : 'add',
+                type: 'node',
+                extracted: node,
+                existingMatch: existing,
+                accepted: true,
+              });
+            }
+            for (const edge of validated.edges) {
+              items.push({
+                action: 'add',
+                type: 'edge',
+                extracted: edge,
+                accepted: true,
+              });
+            }
+
+            useLLMStore.getState().setDiff({ items });
+            useLLMStore.getState().setStatus('extracted');
+          }
+          break;
+        }
+        case 'error':
+          chrome.runtime.onMessage.removeListener(listener);
+          useLLMStore.getState().setError(event.error ?? 'Agent loop failed');
+          break;
+        case 'done':
+          chrome.runtime.onMessage.removeListener(listener);
+          // If status is still agent-running (no extraction_complete), just finish
+          if (useLLMStore.getState().status === 'agent-running') {
+            useLLMStore.getState().setStatus('idle');
+          }
+          break;
+      }
+    };
+
+    chrome.runtime.onMessage.addListener(listener);
+  }, []);
+
   const proceedToReview = useCallback(() => {
     useLLMStore.getState().setStatus('reviewing');
   }, []);
 
-  return { startExtraction, applyDiff, proceedToReview };
+  return { startExtraction, startAgentExtraction, applyDiff, proceedToReview };
 }

@@ -1,4 +1,5 @@
 import { extractPageContent, getSelectedText } from './page-extractor';
+import { executeTool } from './tool-executor';
 
 // Listen for messages from the service worker
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -29,6 +30,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
       }
       sendResponse({ success: true });
+      break;
+    }
+
+    case 'TOOL_EXECUTE': {
+      try {
+        const { toolName, toolInput } = message.payload;
+        const result = executeTool(toolName, toolInput ?? {});
+        sendResponse({ result });
+      } catch (e: any) {
+        sendResponse({ result: '', error: e.message });
+      }
+      break;
+    }
+
+    case 'PING': {
+      sendResponse({ pong: true });
       break;
     }
   }

@@ -190,6 +190,41 @@ export interface AgentRun {
   completedAt?: number;
 }
 
+// Agent tool-use types
+export interface ToolCall {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+export type AgentProgressEventType =
+  | 'llm_start'
+  | 'llm_chunk'
+  | 'llm_end'
+  | 'tool_call'
+  | 'tool_result'
+  | 'extraction_complete'
+  | 'error'
+  | 'done';
+
+export interface AgentProgressEvent {
+  type: AgentProgressEventType;
+  text?: string;
+  toolCall?: ToolCall;
+  toolResult?: string;
+  toolError?: string;
+  extractionResult?: ExtractionResult;
+  error?: string;
+}
+
+export interface AgentTurn {
+  type: 'thinking' | 'tool_call' | 'tool_result';
+  content: string;
+  toolName?: string;
+  toolInput?: Record<string, unknown>;
+  collapsed?: boolean;
+}
+
 // Display mode
 export type DisplayMode = 'sidePanel' | 'tab';
 

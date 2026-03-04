@@ -19,7 +19,8 @@ A Chrome Manifest V3 extension that provides a local-first knowledge graph with 
 |  |  - Page text extract   |     |  - Message routing            |    |
 |  |  - Selection capture   |     |  - Context menu registration  |    |
 |  |  - Readability parse   |     |  - Side panel behavior mgmt   |    |
-|  +-----------|------------+     |  - Offscreen doc lifecycle     |    |
+|  |  - Agent tool executor |     |  - Offscreen doc lifecycle     |    |
+|  +-----------|------------+     |  - Content script injection    |    |
 |              |                  +--------|------------|----------+    |
 |              | chrome.runtime            |            |               |
 |              | .sendMessage()            |            |               |
@@ -34,9 +35,9 @@ A Chrome Manifest V3 extension that provides a local-first knowledge graph with 
 |  |  chrome-extension://id/index.html         |  |                |  |
 |  |                                           |  | - LLM fetch    |  |
 |  |  +------+ +----------+ +--------------+   |  |   w/ streaming |  |
-|  |  |Zustand| |React UI  | |Reagraph      |  |  | - Keepalive    |  |
-|  |  |Stores | |Panels    | |GraphCanvas   |  |  |   for long     |  |
-|  |  +---|---+ +----------+ +--------------+   |  |   requests     |  |
+|  |  |Zustand| |React UI  | |Reagraph      |  |  | - Agent loop   |  |
+|  |  |Stores | |Panels    | |GraphCanvas   |  |  |   (tool-use)   |  |
+|  |  +---|---+ +----------+ +--------------+   |  | - Keepalive    |  |
 |  |      |                                     |  +----------------+  |
 |  |  +---|-----------------------------------+ |                      |
 |  |  | DB CLIENT (postMessage to worker)     | |                      |
@@ -55,10 +56,10 @@ A Chrome Manifest V3 extension that provides a local-first knowledge graph with 
 
 | Context | Lifecycle | Capabilities | Restrictions |
 |---|---|---|---|
-| **Service Worker** | Ephemeral (30s idle / 5min max) | `chrome.*` APIs, message routing | No DOM, no long-running tasks |
+| **Service Worker** | Ephemeral (30s idle / 5min max) | `chrome.*` APIs, message routing, content script injection | No DOM, no long-running tasks |
 | **Side Panel / Tab** | User-controlled | Full DOM, WebGL, Web Workers, OPFS | CSP: `script-src 'self' 'wasm-unsafe-eval'` |
-| **Offscreen Document** | Managed by SW | DOM (hidden), fetch, long-lived | No UI, no `chrome.tabs` |
-| **Content Script** | Per-page, isolated world | Page DOM read access | No extension storage, limited APIs |
+| **Offscreen Document** | Managed by SW | DOM (hidden), fetch, long-lived; hosts agent loop + LLM streaming | No UI, no `chrome.tabs` |
+| **Content Script** | Per-page, isolated world | Page DOM read access, agent tool execution | No extension storage, limited APIs |
 | **DB Web Worker** | Spawned by UI | WASM, OPFS, Asyncify | No DOM, no `chrome.*` APIs |
 
 ---
@@ -89,8 +90,9 @@ kg_extension/
 │   └── icons/
 ├── src/
 │   ├── shared/                # Cross-context types and constants
-│   │   ├── types.ts           # GraphNode, GraphEdge, DbNode, DbEdge, LLMConfig
+│   │   ├── types.ts           # GraphNode, GraphEdge, DbNode, DbEdge, LLMConfig, ToolCall, AgentTurn
 │   │   ├── messages.ts        # Typed message protocol for chrome.runtime
+│   │   ├── agent-tools.ts     # Agent tool definitions + toAnthropicTools() converter
 │   │   ├── schema.ts          # Zod validation schemas
 │   │   └── constants.ts       # Colors, layout options, storage keys
 │   ├── db/
@@ -115,8 +117,9 @@ kg_extension/
 │   │   └── troika-worker-utils-shim.ts  # Main-thread shim (see Pitfall #1)
 │   ├── llm/                        # (planned) Provider abstraction
 │   ├── content-script/
-│   │   ├── index.ts                # Entry: listens for extraction requests
-│   │   └── page-extractor.ts       # Readability-based text extraction
+│   │   ├── index.ts                # Entry: listens for extraction + TOOL_EXECUTE requests
+│   │   ├── page-extractor.ts       # Readability-based text extraction
+│   │   └── tool-executor.ts        # Agent tool implementations (DOM inspection tools)
 │   ├── service-worker/
 │   │   ├── index.ts                # Entry: event listeners, panel behavior sync
 │   │   ├── message-router.ts       # Dispatches chrome.runtime messages
@@ -125,8 +128,9 @@ kg_extension/
 │   │   ├── sidepanel-manager.ts    # Display mode preference
 │   │   └── tab-manager.ts          # Extension tab open/close/focus
 │   ├── offscreen/
-│   │   ├── index.ts                # Entry: message listener
-│   │   └── llm-executor.ts         # Direct HTTP to OpenAI/Anthropic with streaming
+│   │   ├── index.ts                # Entry: message listener (LLM_REQUEST + AGENT_RUN_START)
+│   │   ├── llm-executor.ts         # Direct HTTP to OpenAI/Anthropic with streaming + tool-use
+│   │   └── agent-loop.ts           # Agentic tool-use loop for page extraction
 │   └── ui/
 │       ├── index.html              # Single HTML entry for both side panel and tab
 │       ├── main.tsx                # React root mount
@@ -143,6 +147,13 @@ kg_extension/
 │       │   ├── panels/                   # Node/edge detail, create, property editor
 │       │   ├── search/SearchPanel.tsx    # FTS5 or LIKE fallback search
 │       │   ├── llm/                      # Extraction UI, diff view, streaming output
+│       │   │   ├── LLMPanel.tsx          # Tab toggle (From Page / From Text) + extraction states
+│       │   │   ├── PromptInput.tsx       # User prompt for page extraction (agent mode)
+│       │   │   ├── AgentTimeline.tsx     # Vertical timeline of agent thinking/tool calls
+│       │   │   ├── TextInput.tsx         # Paste text input (non-agent mode)
+│       │   │   ├── DiffView.tsx          # Entity diff review before merge
+│       │   │   ├── ExtractionSummary.tsx # Summary of extracted entities
+│       │   │   └── StreamingOutput.tsx   # Streaming LLM output display
 │       │   └── settings/SettingsPanel.tsx
 │       └── hooks/
 │           ├── useDisplayMode.ts    # Side panel vs tab detection + toggle
@@ -245,6 +256,74 @@ Side Panel (default, ~400px)          Tab (full viewport)
 ```
 
 The service worker uses `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick })` to control what happens when the user clicks the extension icon. A `chrome.storage.onChanged` listener keeps this in sync with the stored preference (see Pitfall #5).
+
+---
+
+## Agent Loop for Page Extraction
+
+The extension supports an agentic LLM extraction mode (Anthropic-only) that inspects the current page DOM via tool calls to extract knowledge graph entities.
+
+### Architecture
+
+```
+UI (PromptInput)                    SW (relay)                  Offscreen (agent-loop.ts)
+      |                                |                              |
+      |--- AGENT_RUN_START ----------->|--- forward ----------------->|
+      |                                |                              |
+      |                                |                    ┌─────────┴─────────┐
+      |                                |                    │ Agent Loop         │
+      |                                |                    │ (max 15 iters)    │
+      |                                |                    │                   │
+      |                                |                    │ 1. LLM call       │
+      |<-- AGENT_PROGRESS (llm_chunk)--|<-- broadcast ------|    w/ tools       │
+      |                                |                    │                   │
+      |                                |                    │ 2. Tool calls:    │
+      |                                |<-- TOOL_EXECUTE ---|    content-script │
+      |                                |--- tabs.sendMsg -->|    tools via SW   |
+      |                                |                    |                   │
+      |                                |    Content Script   │ 3. fetch_url:    │
+      |                                |    executes tool    │    runs locally   │
+      |                                |    sends response   │                   │
+      |                                |--- response ------>|                   │
+      |<-- AGENT_PROGRESS (tool_*)-----|<-- broadcast ------|                   │
+      |                                |                    │ 4. save_entities: │
+      |<-- AGENT_PROGRESS (complete)---|<-- broadcast ------|    terminal       │
+      |                                |                    └───────────────────┘
+```
+
+### Available Tools
+
+| Tool | Context | Description |
+|---|---|---|
+| `get_page_content` | content-script | Full cleaned page text (50KB limit) |
+| `get_page_metadata` | content-script | Title, URL, meta/OG tags, JSON-LD, heading outline |
+| `query_selector` | content-script | Text of first matching CSS selector |
+| `query_selector_all` | content-script | Text of all matching elements (max 50) |
+| `get_links` | content-script | All links with text+href, optional CSS scope |
+| `get_tables` | content-script | HTML tables as row objects (max 5 tables, 100 rows) |
+| `get_structured_data` | content-script | JSON-LD and microdata |
+| `fetch_url` | offscreen | Fetch external URL, return cleaned text (20KB limit) |
+| `save_entities` | offscreen | Terminal tool — saves `{ nodes, edges }` to graph |
+
+### Content Script Injection
+
+The service worker ensures the content script is present before relaying `TOOL_EXECUTE` messages. It pings the content script first; if no response, it injects `content-script.js` via `chrome.scripting.executeScript`. This handles tabs opened before the extension was installed/reloaded. Requires `scripting` permission and `host_permissions: ["<all_urls>"]`.
+
+### Message Types
+
+| Message | Direction | Purpose |
+|---|---|---|
+| `AGENT_RUN_START` | UI → SW → Offscreen | Start agent loop with user prompt + tab ID |
+| `AGENT_PROGRESS` | Offscreen → broadcast | Progress events (llm_chunk, tool_call, tool_result, extraction_complete, error, done) |
+| `TOOL_EXECUTE` | Offscreen → SW → Content Script | Execute a DOM tool in the content script |
+
+### UI States
+
+The LLM panel has two tabs:
+- **From Page** — Prompt input for agentic extraction from the current tab (Anthropic-only)
+- **From Text** — Paste text for non-agentic extraction (any provider)
+
+Both flows share the same diff review → merge pipeline after extraction completes.
 
 ---
 
