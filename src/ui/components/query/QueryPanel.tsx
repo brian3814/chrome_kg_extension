@@ -2,11 +2,12 @@ import React, { useState, useRef, useCallback } from 'react';
 import { graph } from '../../../db/client/db-client';
 import { QueryBuilder, parseBuilderState } from './QueryBuilder';
 import { RawQueryEditor } from './RawQueryEditor';
+import { NLQueryInput } from './NLQueryInput';
 import { QueryResults } from './QueryResults';
 import type { BuilderState } from './QueryBuilder';
 import type { QueryResult } from '../../../db/worker/query-engine/types';
 
-type Mode = 'builder' | 'raw';
+type Mode = 'builder' | 'raw' | 'nl';
 
 export function QueryPanel() {
   const [mode, setMode] = useState<Mode>('builder');
@@ -23,6 +24,11 @@ export function QueryPanel() {
 
   const handleQueryReady = useCallback((json: string | null) => {
     currentJson.current = json;
+  }, []);
+
+  const switchToRawWithJson = useCallback((json: string) => {
+    setRawInitialJson(json);
+    setMode('raw');
   }, []);
 
   const switchMode = (next: Mode) => {
@@ -87,6 +93,16 @@ export function QueryPanel() {
         >
           Raw JSON
         </button>
+        <button
+          onClick={() => switchMode('nl')}
+          className={`text-xs px-3 py-1.5 rounded ${
+            mode === 'nl'
+              ? 'bg-indigo-600 text-white'
+              : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+          }`}
+        >
+          Ask
+        </button>
       </div>
 
       {/* Active editor */}
@@ -95,21 +111,23 @@ export function QueryPanel() {
           onQueryReady={handleQueryReady}
           initialState={builderState.current}
         />
-      ) : (
+      ) : mode === 'raw' ? (
         <RawQueryEditor
           initialJson={rawInitialJson}
           onQueryReady={handleQueryReady}
         />
+      ) : (
+        <NLQueryInput onEditAsRaw={switchToRawWithJson} />
       )}
 
-      {/* Run button */}
-      <button
+      {/* Run button (hidden in NL mode — NLQueryInput handles its own execution) */}
+      {mode !== 'nl' && <button
         onClick={runQuery}
         disabled={loading}
         className="w-full bg-indigo-600 text-white text-sm py-1.5 rounded hover:bg-indigo-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {loading ? 'Running...' : 'Run Query'}
-      </button>
+      </button>}
 
       {/* Error */}
       {error && (

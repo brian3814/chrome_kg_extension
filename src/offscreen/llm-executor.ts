@@ -25,12 +25,12 @@ export async function executeLLMRequestStreaming(
   payload: LLMRequestMessage['payload'],
   onChunk: (text: string, done: boolean) => void
 ): Promise<{ content: string }> {
-  const { provider, model, apiKey, prompt } = payload;
+  const { provider, model, apiKey, prompt, systemPrompt } = payload;
 
   if (provider === 'openai') {
-    return await streamOpenAI(apiKey, model, prompt, onChunk);
+    return await streamOpenAI(apiKey, model, prompt, onChunk, systemPrompt);
   } else if (provider === 'anthropic') {
-    return await streamAnthropic(apiKey, model, prompt, onChunk);
+    return await streamAnthropic(apiKey, model, prompt, onChunk, systemPrompt);
   } else {
     throw new Error(`Unknown provider: ${provider}`);
   }
@@ -40,8 +40,13 @@ async function streamOpenAI(
   apiKey: string,
   model: string,
   userPrompt: string,
-  onChunk: (text: string, done: boolean) => void
+  onChunk: (text: string, done: boolean) => void,
+  customSystemPrompt?: string
 ): Promise<{ content: string }> {
+  const systemPrompt = customSystemPrompt ?? EXTRACTION_SYSTEM_PROMPT;
+  const userContent = customSystemPrompt
+    ? userPrompt
+    : `Extract entities and relationships from the following text:\n\n${userPrompt}`;
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -51,8 +56,8 @@ async function streamOpenAI(
     body: JSON.stringify({
       model,
       messages: [
-        { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
-        { role: 'user', content: `Extract entities and relationships from the following text:\n\n${userPrompt}` },
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userContent },
       ],
       temperature: 0.1,
       response_format: { type: 'json_object' },
@@ -105,8 +110,13 @@ async function streamAnthropic(
   apiKey: string,
   model: string,
   userPrompt: string,
-  onChunk: (text: string, done: boolean) => void
+  onChunk: (text: string, done: boolean) => void,
+  customSystemPrompt?: string
 ): Promise<{ content: string }> {
+  const systemPrompt = customSystemPrompt ?? EXTRACTION_SYSTEM_PROMPT;
+  const userContent = customSystemPrompt
+    ? userPrompt
+    : `Extract entities and relationships from the following text:\n\n${userPrompt}`;
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -118,9 +128,9 @@ async function streamAnthropic(
     body: JSON.stringify({
       model,
       max_tokens: 4096,
-      system: EXTRACTION_SYSTEM_PROMPT,
+      system: systemPrompt,
       messages: [
-        { role: 'user', content: `Extract entities and relationships from the following text:\n\n${userPrompt}` },
+        { role: 'user', content: userContent },
       ],
       stream: true,
     }),

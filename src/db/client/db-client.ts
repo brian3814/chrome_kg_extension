@@ -136,6 +136,7 @@ export const edges = {
   update: (input: any) => sendRequest('edges.update', input) as Promise<any>,
   delete: (id: string) => sendRequest('edges.delete', id) as Promise<boolean>,
   getBetween: (nodeIds: string[]) => sendRequest('edges.getBetween', nodeIds) as Promise<any[]>,
+  getTypes: () => sendRequest('edges.getTypes') as Promise<string[]>,
 };
 
 // Node type operations

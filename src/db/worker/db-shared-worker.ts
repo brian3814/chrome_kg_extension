@@ -176,6 +176,11 @@ async function handleAction(action: string, params: unknown): Promise<{ result: 
       };
     }
 
+    case 'edges.getTypes': {
+      ensureInit();
+      return { result: await edgeQueries.getEdgeTypes() };
+    }
+
     case 'edges.getBetween': {
       ensureInit();
       return { result: await edgeQueries.getEdgesBetween(params as string[]) };

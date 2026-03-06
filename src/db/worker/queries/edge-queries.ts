@@ -93,6 +93,11 @@ export async function deleteEdge(id: string): Promise<boolean> {
   return changes > 0;
 }
 
+export async function getEdgeTypes(): Promise<string[]> {
+  const { rows } = await executeQuery<{ type: string }>('SELECT DISTINCT type FROM edges ORDER BY type;');
+  return rows.map(r => r.type);
+}
+
 export async function getEdgesBetween(nodeIds: string[]): Promise<DbEdge[]> {
   if (nodeIds.length === 0) return [];
   const placeholders = nodeIds.map(() => '?').join(',');
