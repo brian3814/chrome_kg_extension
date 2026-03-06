@@ -5,7 +5,7 @@ import { useGraphStore } from '../../graph/store/graph-store';
 
 export function Header() {
   const { displayMode, toggleMode } = useDisplayMode();
-  const { activePanel, setActivePanel, is3D, toggle3D, clusteringEnabled, toggleClustering } = useUIStore();
+  const { activePanel, setActivePanel, is3D, toggle3D, clusteringEnabled, toggleClustering, chatOpen, toggleChat } = useUIStore();
   const nodeCount = useGraphStore((s) => s.nodes.length);
   const edgeCount = useGraphStore((s) => s.edges.length);
   const isSidePanel = displayMode === 'sidePanel';
@@ -50,6 +50,14 @@ export function Header() {
           title="LLM Extract"
         >
           <SparklesIcon />
+        </ToolbarButton>
+
+        <ToolbarButton
+          active={chatOpen}
+          onClick={toggleChat}
+          title="Ask (chat)"
+        >
+          <ChatIcon />
         </ToolbarButton>
 
         <div className="w-px h-4 bg-zinc-600 mx-1" />
@@ -138,6 +146,12 @@ const PlusIcon = () => (
 const SparklesIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
     <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+  </svg>
+);
+
+const ChatIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m3 21 1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z" />
   </svg>
 );
 

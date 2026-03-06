@@ -3,6 +3,7 @@ import type { DisplayMode } from '../../shared/types';
 
 type ActivePanel = 'none' | 'nodeDetail' | 'edgeDetail' | 'create' | 'search' | 'query' | 'llm' | 'settings';
 type LayoutType = string;
+type ChatDisplayMode = 'float' | 'sidebar';
 
 interface UIStore {
   displayMode: DisplayMode;
@@ -11,6 +12,8 @@ interface UIStore {
   is3D: boolean;
   clusteringEnabled: boolean;
   graphKey: number; // increment to force graph re-render
+  chatOpen: boolean;
+  chatDisplayMode: ChatDisplayMode;
 
   setDisplayMode: (mode: DisplayMode) => void;
   setActivePanel: (panel: ActivePanel) => void;
@@ -18,6 +21,9 @@ interface UIStore {
   toggle3D: () => void;
   toggleClustering: () => void;
   incrementGraphKey: () => void;
+  toggleChat: () => void;
+  setChatOpen: (open: boolean) => void;
+  setChatDisplayMode: (mode: ChatDisplayMode) => void;
 }
 
 export const useUIStore = create<UIStore>((set) => ({
@@ -27,6 +33,8 @@ export const useUIStore = create<UIStore>((set) => ({
   is3D: false,
   clusteringEnabled: true,
   graphKey: 0,
+  chatOpen: false,
+  chatDisplayMode: 'float',
 
   setDisplayMode: (mode) => set({ displayMode: mode }),
   setActivePanel: (panel) =>
@@ -46,4 +54,8 @@ export const useUIStore = create<UIStore>((set) => ({
     set((state) => ({ clusteringEnabled: !state.clusteringEnabled })),
   incrementGraphKey: () =>
     set((state) => ({ graphKey: state.graphKey + 1 })),
+  toggleChat: () =>
+    set((state) => ({ chatOpen: !state.chatOpen })),
+  setChatOpen: (open) => set({ chatOpen: open }),
+  setChatDisplayMode: (mode) => set({ chatDisplayMode: mode }),
 }));
