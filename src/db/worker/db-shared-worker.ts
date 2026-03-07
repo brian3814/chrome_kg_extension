@@ -1,16 +1,13 @@
 /// <reference lib="webworker" />
 
-import { initSQLite, resetDatabase } from './sqlite-engine';
-import { runMigrations } from './migrations';
-import { executeQuery, executeExec } from './query-executor';
-import * as nodeQueries from './queries/node-queries';
-import * as edgeQueries from './queries/edge-queries';
-import * as nodeTypeQueries from './queries/node-type-queries';
-import * as sourceContentQueries from './queries/source-content-queries';
-import * as entityResolutionQueries from './queries/entity-resolution-queries';
-import * as indexedFileQueries from './queries/indexed-file-queries';
-import { executeGraphQuery, executeGraphMutation } from './query-engine';
 import { SYNC_CHANNEL, type SyncEvent } from '../../shared/sync-events';
+
+/**
+ * SharedWorker coordinator — spawns a single Dedicated Worker that holds SQLite.
+ * The Dedicated Worker has access to OPFS (createSyncAccessHandle),
+ * which is unavailable in SharedWorkers. This coordinator routes messages
+ * between UI ports and the Dedicated Worker, and broadcasts sync events.
+ */
 
 type WorkerRequest = {
   requestId: string;
@@ -23,331 +20,152 @@ type WorkerResponse = {
   success: boolean;
   data?: unknown;
   error?: string;
+  syncEvent?: SyncEvent;
 };
 
 declare var self: SharedWorkerGlobalScope;
 
-let isInitialized = false;
-const ports: MessagePort[] = [];
 const syncChannel = new BroadcastChannel(SYNC_CHANNEL);
 
-function broadcast(event: SyncEvent): void {
-  syncChannel.postMessage(event);
+// Track which port sent each request so we can route responses back
+const pendingRequests = new Map<string, MessagePort>();
+
+let dedicatedWorker: Worker | null = null;
+let workerReady = false;
+let workerInitPromise: Promise<void> | null = null;
+
+// Queue requests that arrive before the dedicated worker is ready
+const earlyQueue: Array<{ port: MessagePort; request: WorkerRequest }> = [];
+
+function spawnDedicatedWorker(): Promise<void> {
+  if (workerInitPromise) return workerInitPromise;
+
+  workerInitPromise = new Promise<void>((resolve, reject) => {
+    try {
+      const workerUrl = new URL('/db-worker.js', location.origin).href;
+      dedicatedWorker = new Worker(workerUrl, { type: 'module' });
+
+      dedicatedWorker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+        const { requestId, success, data, error, syncEvent } = event.data;
+
+        // Handle the dedicated worker's initial load signal
+        if (requestId === '__init__') {
+          return;
+        }
+
+        // Route response back to the originating port
+        const originPort = pendingRequests.get(requestId);
+        if (originPort) {
+          pendingRequests.delete(requestId);
+          originPort.postMessage({ requestId, success, data, error } as WorkerResponse);
+        }
+
+        // Broadcast sync event to all tabs
+        if (syncEvent) {
+          syncChannel.postMessage(syncEvent);
+        }
+      };
+
+      dedicatedWorker.onerror = (event) => {
+        console.error('[DB SharedWorker] Dedicated worker error:', event);
+
+        // Reject all pending requests
+        for (const [reqId, port] of pendingRequests) {
+          port.postMessage({
+            requestId: reqId,
+            success: false,
+            error: 'Dedicated DB worker crashed',
+          } as WorkerResponse);
+        }
+        pendingRequests.clear();
+
+        // Reset worker state so next request triggers respawn
+        dedicatedWorker = null;
+        workerReady = false;
+        workerInitPromise = null;
+      };
+
+      // Send init to the dedicated worker and wait for its response
+      const initRequestId = `__coordinator_init__${Date.now()}`;
+      dedicatedWorker.postMessage({ requestId: initRequestId, action: 'init' } as WorkerRequest);
+
+      // Listen for the init response
+      const onInitResponse = (event: MessageEvent<WorkerResponse>) => {
+        if (event.data.requestId === initRequestId) {
+          dedicatedWorker!.removeEventListener('message', onInitResponse);
+          if (event.data.success) {
+            workerReady = true;
+            // Flush any queued requests
+            for (const { port, request } of earlyQueue) {
+              forwardToDedicatedWorker(port, request);
+            }
+            earlyQueue.length = 0;
+            resolve();
+          } else {
+            reject(new Error(event.data.error ?? 'Dedicated worker init failed'));
+          }
+        }
+      };
+      dedicatedWorker.addEventListener('message', onInitResponse);
+    } catch (e) {
+      workerInitPromise = null;
+      reject(e);
+    }
+  });
+
+  return workerInitPromise;
 }
 
-function respond(port: MessagePort, requestId: string, success: boolean, data?: unknown, error?: string): void {
-  const response: WorkerResponse = { requestId, success, data, error };
-  port.postMessage(response);
-}
-
-function ensureInit(): void {
-  if (!isInitialized) {
-    throw new Error('Database not initialized. Call init first.');
-  }
-}
-
-// Mutation actions that need Web Locks + sync broadcasting
-const MUTATION_ACTIONS = new Set([
-  'nodes.create', 'nodes.update', 'nodes.delete',
-  'edges.create', 'edges.update', 'edges.delete',
-  'nodeTypes.create', 'nodeTypes.delete',
-  'sourceContent.save', 'sourceContent.delete',
-  'entityResolution.addAlias', 'entityResolution.removeAlias',
-  'indexedFiles.save', 'indexedFiles.delete', 'indexedFiles.deleteByNodeId',
-  'mutation.execute', 'exec', 'reset', 'clearAll',
-]);
-
-async function handleAction(action: string, params: unknown): Promise<{ result: unknown; syncEvent?: SyncEvent }> {
-  switch (action) {
-    case 'init': {
-      if (!isInitialized) {
-        await initSQLite();
-        await runMigrations();
-        isInitialized = true;
-      }
-      return { result: { ready: true } };
-    }
-
-    case 'reset': {
-      await resetDatabase();
-      await runMigrations();
-      isInitialized = true;
-      return { result: { ready: true }, syncEvent: { type: 'reset' } };
-    }
-
-    case 'clearAll': {
-      ensureInit();
-      await executeExec('DELETE FROM edges');
-      await executeExec('DELETE FROM nodes');
-      return { result: { success: true }, syncEvent: { type: 'reset' } };
-    }
-
-    case 'exec': {
-      ensureInit();
-      const p = params as { sql: string; params?: unknown[] };
-      const { changes } = await executeExec(p.sql, p.params);
-      return { result: { changes } };
-    }
-
-    case 'query': {
-      ensureInit();
-      const p = params as { sql: string; params?: unknown[] };
-      const { rows } = await executeQuery(p.sql, p.params);
-      return { result: { rows } };
-    }
-
-    // Node operations
-    case 'nodes.getAll': {
-      ensureInit();
-      return { result: await nodeQueries.getAllNodes() };
-    }
-
-    case 'nodes.getById': {
-      ensureInit();
-      return { result: await nodeQueries.getNodeById(params as string) };
-    }
-
-    case 'nodes.create': {
-      ensureInit();
-      const node = await nodeQueries.createNode(params as any);
-      return { result: node, syncEvent: { type: 'node_created', node } };
-    }
-
-    case 'nodes.update': {
-      ensureInit();
-      const node = await nodeQueries.updateNode(params as any);
-      return { result: node, syncEvent: node ? { type: 'node_updated', node } : undefined };
-    }
-
-    case 'nodes.delete': {
-      ensureInit();
-      const success = await nodeQueries.deleteNode(params as string);
-      return {
-        result: success,
-        syncEvent: success ? { type: 'node_deleted', id: params as string } : undefined,
-      };
-    }
-
-    case 'nodes.search': {
-      ensureInit();
-      const p = params as { query: string; limit?: number };
-      return { result: await nodeQueries.searchNodes(p.query, p.limit) };
-    }
-
-    case 'nodes.getTypes': {
-      ensureInit();
-      return { result: await nodeQueries.getNodeTypes() };
-    }
-
-    case 'nodes.matchTerms': {
-      ensureInit();
-      const p = params as { terms: string[]; limit?: number };
-      return { result: await nodeQueries.matchTerms(p.terms, p.limit) };
-    }
-
-    case 'nodes.getNeighborhood': {
-      ensureInit();
-      const p = params as { nodeId: string; hops?: number };
-      return { result: await nodeQueries.getNeighborhood(p.nodeId, p.hops) };
-    }
-
-    // Edge operations
-    case 'edges.getAll': {
-      ensureInit();
-      return { result: await edgeQueries.getAllEdges() };
-    }
-
-    case 'edges.getById': {
-      ensureInit();
-      return { result: await edgeQueries.getEdgeById(params as string) };
-    }
-
-    case 'edges.getForNode': {
-      ensureInit();
-      return { result: await edgeQueries.getEdgesForNode(params as string) };
-    }
-
-    case 'edges.create': {
-      ensureInit();
-      const edge = await edgeQueries.createEdge(params as any);
-      return { result: edge, syncEvent: { type: 'edge_created', edge } };
-    }
-
-    case 'edges.update': {
-      ensureInit();
-      const edge = await edgeQueries.updateEdge(params as any);
-      return { result: edge, syncEvent: edge ? { type: 'edge_updated', edge } : undefined };
-    }
-
-    case 'edges.delete': {
-      ensureInit();
-      const success = await edgeQueries.deleteEdge(params as string);
-      return {
-        result: success,
-        syncEvent: success ? { type: 'edge_deleted', id: params as string } : undefined,
-      };
-    }
-
-    case 'edges.getTypes': {
-      ensureInit();
-      return { result: await edgeQueries.getEdgeTypes() };
-    }
-
-    case 'edges.getBetween': {
-      ensureInit();
-      return { result: await edgeQueries.getEdgesBetween(params as string[]) };
-    }
-
-    // Node type operations
-    case 'nodeTypes.getAll': {
-      ensureInit();
-      return { result: await nodeTypeQueries.getAllNodeTypes() };
-    }
-
-    case 'nodeTypes.create': {
-      ensureInit();
-      const nodeType = await nodeTypeQueries.createNodeType(params as any);
-      return { result: nodeType, syncEvent: { type: 'node_type_created', nodeType } };
-    }
-
-    case 'nodeTypes.delete': {
-      ensureInit();
-      const success = await nodeTypeQueries.deleteNodeType(params as string);
-      return {
-        result: success,
-        syncEvent: success ? { type: 'node_type_deleted', nodeTypeId: params as string } : undefined,
-      };
-    }
-
-    // Source content operations
-    case 'sourceContent.save': {
-      ensureInit();
-      return { result: await sourceContentQueries.saveSourceContent(params as any) };
-    }
-
-    case 'sourceContent.getByNodeId': {
-      ensureInit();
-      return { result: await sourceContentQueries.getByNodeId(params as string) };
-    }
-
-    case 'sourceContent.getByUrl': {
-      ensureInit();
-      return { result: await sourceContentQueries.getByUrl(params as string) };
-    }
-
-    case 'sourceContent.search': {
-      ensureInit();
-      const p = params as { query: string; limit?: number };
-      return { result: await sourceContentQueries.searchContent(p.query, p.limit) };
-    }
-
-    case 'sourceContent.delete': {
-      ensureInit();
-      return { result: await sourceContentQueries.deleteByNodeId(params as string) };
-    }
-
-    case 'sourceContent.getAll': {
-      ensureInit();
-      return { result: await sourceContentQueries.getAllSourceContent() };
-    }
-
-    // Entity resolution operations
-    case 'entityResolution.findMatches': {
-      ensureInit();
-      const p = params as { label: string; fuzzyThreshold?: number };
-      return { result: await entityResolutionQueries.findMatches(p.label, p.fuzzyThreshold) };
-    }
-
-    case 'entityResolution.addAlias': {
-      ensureInit();
-      const p = params as { nodeId: string; alias: string };
-      return { result: await entityResolutionQueries.addAlias(p.nodeId, p.alias) };
-    }
-
-    case 'entityResolution.getAliases': {
-      ensureInit();
-      return { result: await entityResolutionQueries.getAliases(params as string) };
-    }
-
-    case 'entityResolution.removeAlias': {
-      ensureInit();
-      return { result: await entityResolutionQueries.removeAlias(params as string) };
-    }
-
-    // Indexed file operations
-    case 'indexedFiles.save': {
-      ensureInit();
-      return { result: await indexedFileQueries.saveIndexedFile(params as any) };
-    }
-
-    case 'indexedFiles.getByPath': {
-      ensureInit();
-      return { result: await indexedFileQueries.getByPath(params as string) };
-    }
-
-    case 'indexedFiles.getAll': {
-      ensureInit();
-      return { result: await indexedFileQueries.getAllIndexedFiles() };
-    }
-
-    case 'indexedFiles.delete': {
-      ensureInit();
-      return { result: await indexedFileQueries.deleteByPath(params as string) };
-    }
-
-    case 'indexedFiles.deleteByNodeId': {
-      ensureInit();
-      return { result: await indexedFileQueries.deleteByNodeId(params as string) };
-    }
-
-    case 'indexedFiles.getByNodeId': {
-      ensureInit();
-      return { result: await indexedFileQueries.getByNodeId(params as string) };
-    }
-
-    // Query engine operations
-    case 'query.execute': {
-      ensureInit();
-      return { result: await executeGraphQuery(params) };
-    }
-
-    case 'mutation.execute': {
-      ensureInit();
-      return { result: await executeGraphMutation(params) };
-    }
-
-    default:
-      throw new Error(`Unknown action: ${action}`);
-  }
+function forwardToDedicatedWorker(port: MessagePort, request: WorkerRequest): void {
+  if (!dedicatedWorker) return;
+  pendingRequests.set(request.requestId, port);
+  dedicatedWorker.postMessage(request);
 }
 
 self.onconnect = (connectEvent: MessageEvent) => {
   const port = connectEvent.ports[0];
-  ports.push(port);
 
   port.onmessage = async (event: MessageEvent<WorkerRequest>) => {
-    const { requestId, action, params } = event.data;
+    const request = event.data;
 
-    try {
-      let outcome: { result: unknown; syncEvent?: SyncEvent };
-
-      if (MUTATION_ACTIONS.has(action)) {
-        // Wrap mutations in a Web Lock for cross-tab safety
-        outcome = await navigator.locks.request('kg_extension_db_write', () =>
-          handleAction(action, params)
-        );
-      } else {
-        outcome = await handleAction(action, params);
+    // Intercept init — the coordinator handles initialization
+    if (request.action === 'init') {
+      try {
+        await spawnDedicatedWorker();
+        port.postMessage({
+          requestId: request.requestId,
+          success: true,
+          data: { ready: true },
+        } as WorkerResponse);
+      } catch (e: any) {
+        port.postMessage({
+          requestId: request.requestId,
+          success: false,
+          error: e.message ?? String(e),
+        } as WorkerResponse);
       }
+      return;
+    }
 
-      respond(port, requestId, true, outcome.result);
-
-      if (outcome.syncEvent) {
-        broadcast(outcome.syncEvent);
-      }
-    } catch (error: any) {
-      console.error(`[DB SharedWorker] Error handling ${action}:`, error);
-      respond(port, requestId, false, undefined, error.message ?? String(error));
+    // For all other actions, forward to dedicated worker
+    if (workerReady && dedicatedWorker) {
+      forwardToDedicatedWorker(port, request);
+    } else {
+      // Queue until worker is ready (shouldn't normally happen since
+      // db-client always sends init first, but handles race conditions)
+      earlyQueue.push({ port, request });
+      // Ensure worker is spawning
+      spawnDedicatedWorker().catch(() => {
+        // Drain early queue with errors
+        for (const { port: p, request: r } of earlyQueue) {
+          p.postMessage({
+            requestId: r.requestId,
+            success: false,
+            error: 'Failed to spawn dedicated DB worker',
+          } as WorkerResponse);
+        }
+        earlyQueue.length = 0;
+      });
     }
   };
 

@@ -5,10 +5,13 @@ import { OriginPrivateFileSystemVFS } from 'wa-sqlite/src/examples/OriginPrivate
 // @ts-expect-error - wa-sqlite VFS module
 import { IDBBatchAtomicVFS } from 'wa-sqlite/src/examples/IDBBatchAtomicVFS.js';
 
+import { migrateFromIDB } from './idb-to-opfs-migration';
+
 const DB_NAME = 'kg_extension.db';
 
 let sqlite3: any = null;
 let db: number | null = null;
+let vfsName: string = 'unknown';
 
 // Serial execution queue to prevent concurrent Asyncify operations.
 // The wa-sqlite async build uses Asyncify which corrupts WASM state
@@ -53,6 +56,7 @@ export async function initSQLite(): Promise<void> {
       const vfs = new OriginPrivateFileSystemVFS();
       sqlite3.vfs_register(vfs, true);
       db = await sqlite3.open_v2(DB_NAME);
+      vfsName = 'opfs';
       console.log('[DB] SQLite initialized with OPFS VFS');
     } catch (e) {
       console.warn('[DB] OPFS VFS open failed, falling back:', e);
@@ -68,6 +72,7 @@ export async function initSQLite(): Promise<void> {
       const vfs = new IDBBatchAtomicVFS();
       sqlite3.vfs_register(vfs, true);
       db = await sqlite3.open_v2(DB_NAME);
+      vfsName = 'idb';
       console.log('[DB] SQLite initialized with IDB (IndexedDB) VFS');
     } catch (e) {
       console.warn('[DB] IDB VFS open failed, falling back to in-memory:', e);
@@ -78,12 +83,18 @@ export async function initSQLite(): Promise<void> {
   // Last resort: default in-memory VFS
   if (db === null) {
     db = await sqlite3.open_v2(DB_NAME);
+    vfsName = 'memory';
     console.warn('[DB] SQLite initialized with default (in-memory) VFS — data will not persist');
   }
 
   // Configure pragmas (not serialized — nothing else is running yet)
   await sqlite3.exec(db, 'PRAGMA journal_mode = WAL;');
   await sqlite3.exec(db, 'PRAGMA foreign_keys = ON;');
+
+  // Migrate data from IDB to OPFS if this is an OPFS database
+  if (vfsName === 'opfs') {
+    await migrateFromIDB(sqlite3, db!);
+  }
 }
 
 /**
@@ -166,6 +177,10 @@ export function getChanges(): number {
  * Check if a SQLite compile-time module (like fts5) is available
  * by querying the module list pragma.
  */
+export function getVfsName(): string {
+  return vfsName;
+}
+
 export async function checkModuleAvailable(moduleName: string): Promise<boolean> {
   try {
     const rows = await query<{ name: string }>(
