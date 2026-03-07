@@ -40,14 +40,21 @@ A Chrome Manifest V3 extension that provides a local-first knowledge graph with 
 |  |  +---|---+ +----------+ +--------------+   |  | - Keepalive    |  |
 |  |      |                                     |  +----------------+  |
 |  |  +---|-----------------------------------+ |                      |
-|  |  | DB CLIENT (postMessage to worker)     | |                      |
-|  |  +---|-----------------------------------+ |                      |
-|  |      | postMessage                         |                      |
-|  |  +---|-----------------------------------+ |                      |
-|  |  | SQLITE WEB WORKER (dedicated)         | |                      |
-|  |  | wa-sqlite + OPFS VFS                  | |                      |
-|  |  | [OPFS: /kg_extension.db]              | |                      |
-|  |  +---------------------------------------+ |                      |
+|  |  | DB CLIENT                             | |                      |
+|  |  |  Creates Worker + SharedWorker        | |                      |
+|  |  |  Bridges via MessageChannel           | |                      |
+|  |  +---|----------------------|------------+ |                      |
+|  |      | postMessage          | port transfer|                      |
+|  |      v                      v              |                      |
+|  |  +------------------+ +------------------+ |                      |
+|  |  | SHARED WORKER    | | DEDICATED WORKER | |                      |
+|  |  | (coordinator)    | | (SQLite engine)  | |                      |
+|  |  |                  | |                  | |                      |
+|  |  | Routes queries   |<| wa-sqlite + OPFS | |                      |
+|  |  | from all tabs    | | MessageChannel   | |                      |
+|  |  | via MessagePort  |>| port for I/O     | |                      |
+|  |  | Broadcasts sync  | |                  | |                      |
+|  |  +------------------+ +------------------+ |                      |
 |  +--------------------------------------------+                     |
 +======================================================================+
 ```
@@ -60,7 +67,8 @@ A Chrome Manifest V3 extension that provides a local-first knowledge graph with 
 | **Side Panel / Tab** | User-controlled | Full DOM, WebGL, Web Workers, OPFS | CSP: `script-src 'self' 'wasm-unsafe-eval'` |
 | **Offscreen Document** | Managed by SW | DOM (hidden), fetch, long-lived; hosts agent loop + LLM streaming | No UI, no `chrome.tabs` |
 | **Content Script** | Per-page, isolated world | Page DOM read access, agent tool execution | No extension storage, limited APIs |
-| **DB Web Worker** | Spawned by UI | WASM, OPFS, Asyncify | No DOM, no `chrome.*` APIs |
+| **DB SharedWorker** | Shared across tabs | Message routing, sync event broadcast | No DOM, no `chrome.*` APIs, no `Worker` constructor |
+| **DB Dedicated Worker** | Spawned by UI, bridged to SharedWorker | WASM, OPFS, Asyncify | No DOM, no `chrome.*` APIs |
 
 ---
 
@@ -98,7 +106,8 @@ kg_extension/
 │   ├── db/
 │   │   ├── worker/
 │   │   │   ├── sqlite-engine.ts    # wa-sqlite init, OPFS/IDB VFS, serialized query execution
-│   │   │   ├── db-worker.ts        # Web Worker entry: message handler + action dispatch
+│   │   │   ├── db-worker.ts        # Dedicated Worker: SQLite engine, accepts coordinator port
+│   │   │   ├── db-shared-worker.ts # SharedWorker: pure coordinator/router, receives worker port from UI
 │   │   │   ├── query-executor.ts   # SQL execution with retry (SQLITE_BUSY)
 │   │   │   ├── migrations/         # Versioned schema migrations with FTS5 detection
 │   │   │   └── queries/            # Typed CRUD + neighborhood traversal (recursive CTEs)
@@ -165,18 +174,19 @@ kg_extension/
 
 ## Build System
 
-The Vite config uses **four custom plugins** to handle Chrome extension requirements:
+The Vite config uses **five custom plugins** to handle Chrome extension requirements:
 
 ```
 vite.config.ts
-├── react()              # @vitejs/plugin-react
-├── tailwindcss()        # @tailwindcss/vite
-├── fixHtmlPlugin()      # Moves HTML to dist root, fixes asset paths
-├── dbWorkerPlugin()     # Separate ES module build for db-worker.js
-└── contentScriptPlugin()# Separate IIFE build for content-script.js
+├── react()                  # @vitejs/plugin-react
+├── tailwindcss()            # @tailwindcss/vite
+├── fixHtmlPlugin()          # Moves HTML to dist root, fixes asset paths
+├── dbWorkerPlugin()         # Separate ES module build for db-worker.js
+├── dbSharedWorkerPlugin()   # Separate ES module build for db-shared-worker.js
+└── contentScriptPlugin()    # Separate IIFE build for content-script.js
 ```
 
-**Multi-entry build:** The main Vite build produces three entries — the React SPA (`index.html`), the service worker (`service-worker.js`), and the offscreen document (`offscreen.js`). Two additional `closeBundle` plugins run separate Vite builds for the DB worker (ES module) and content script (IIFE).
+**Multi-entry build:** The main Vite build produces three entries — the React SPA (`index.html`), the service worker (`service-worker.js`), and the offscreen document (`offscreen.js`). Three additional `closeBundle` plugins run separate Vite builds for the DB dedicated worker, DB shared worker (both ES modules), and content script (IIFE).
 
 **Key config decisions:**
 - `base: ''` — relative asset paths (Chrome extension URLs are `chrome-extension://id/...`)
@@ -193,20 +203,36 @@ vite.config.ts
 
 ### Architecture
 
+Following [Notion's WASM SQLite architecture](https://www.notion.com/blog/how-we-sped-up-notion-in-the-browser-with-wasm-sqlite), the UI thread creates both workers and bridges them via `MessageChannel`:
+
 ```
-UI Thread                          DB Worker Thread
-┌──────────────┐                  ┌─────────────────────────┐
-│  db-client   │  postMessage     │  db-worker.ts           │
-│              │ ───────────────> │    ├── action dispatch   │
-│  sendRequest │                  │    ├── node-queries.ts   │
-│  (requestId, │ <─────────────── │    ├── edge-queries.ts   │
-│   timeout)   │  postMessage     │    └── query-executor.ts │
-└──────────────┘                  │         └── sqlite-engine│
-                                  │              ├── wa-sqlite│
-                                  │              ├── OPFS VFS│
-                                  │              └── serialize│
-                                  └─────────────────────────┘
+UI Thread (db-client.ts)
+┌────────────────────────────────────────────────────────────┐
+│  1. Creates SharedWorker, sends init                       │
+│  2. SharedWorker responds { needsWorker: true }            │
+│  3. Creates Dedicated Worker + MessageChannel              │
+│  4. Transfers port2 → Dedicated Worker                     │
+│  5. Transfers port1 → SharedWorker                         │
+└──────┬───────────────────────────┬─────────────────────────┘
+       │ postMessage               │ port transfer
+       v                           v
+┌──────────────────┐       ┌─────────────────────────┐
+│  SharedWorker    │       │  Dedicated Worker        │
+│  (coordinator)   │       │  (SQLite engine)         │
+│                  │ port  │                          │
+│  Routes queries  │<─────>│  db-worker.ts            │
+│  from tab ports  │       │    ├── action dispatch   │
+│  to worker port  │       │    ├── node-queries.ts   │
+│                  │       │    ├── edge-queries.ts   │
+│  Broadcasts sync │       │    └── query-executor.ts │
+│  events to tabs  │       │         └── sqlite-engine│
+└──────────────────┘       │              ├── wa-sqlite│
+                           │              ├── OPFS VFS│
+                           │              └── serialize│
+                           └─────────────────────────┘
 ```
+
+**Why two workers?** SharedWorker ensures a single SQLite connection across all tabs (prevents OPFS corruption from concurrent access). Dedicated Worker is required because OPFS `createSyncAccessHandle()` is only available in dedicated workers. The SharedWorker cannot create workers itself (`Worker` is not defined in `SharedWorkerGlobalScope` in Chrome extensions — see Pitfall #12).
 
 ### Serial Execution Queue
 
@@ -254,6 +280,12 @@ Side Panel (default, ~400px)          Tab (full viewport)
 │ (collapsible)        │             │                  │             │
 └──────────────────────┘             └──────────────────┴─────────────┘
 ```
+
+**Mode detection:** The manifest sets `"default_path": "index.html?mode=sidePanel"` for the side panel, and `tab-manager.ts` opens tabs with `?mode=tab`. The `useDisplayMode` hook reads this URL param to determine the current mode (no width heuristic).
+
+**Toggle flow:**
+- **Side panel → Tab:** Service worker calls `openExtensionTab()`, UI calls `window.close()` to close the side panel.
+- **Tab → Side panel:** Service worker calls `sidePanel.open({ windowId })` using `sender.tab.windowId`, UI calls `window.close()` to close the tab.
 
 The service worker uses `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick })` to control what happens when the user clicks the extension icon. A `chrome.storage.onChanged` listener keeps this in sync with the stored preference (see Pitfall #5).
 
@@ -468,7 +500,7 @@ chrome.action.onClicked.addListener(async () => {
 });
 ```
 
-For the tab-to-side-panel toggle, `sidePanel.open()` can't be called from a `chrome.runtime.onMessage` handler (no user gesture). The solution is to set the preference, close the tab, and let the user click the icon to open the side panel.
+For the tab-to-side-panel toggle, the service worker calls `sidePanel.open({ windowId })` from the `TOGGLE_DISPLAY_MODE` message handler. While `sidePanel.open()` technically requires a user gesture, calling it with `windowId` from the service worker works in Chrome 116+. The UI then closes itself via `window.close()`.
 
 ---
 
@@ -624,3 +656,33 @@ if (db === null) {
 ```
 
 **Key invariant:** The VFS fallback chain must always include `open_v2` inside each try/catch. Never separate VFS registration from database opening — registration can succeed even when the underlying filesystem API is unavailable in the current worker context.
+
+---
+
+### Pitfall #12: SharedWorker Cannot Spawn Dedicated Workers in Chrome Extensions
+
+**Problem:** `SharedWorkerGlobalScope` in Chrome extensions does not expose the `Worker` constructor. Calling `new Worker(...)` inside a SharedWorker throws `ReferenceError: Worker is not defined`. This is a Chrome extension-specific limitation — the HTML spec exposes `Worker` in `SharedWorkerGlobalScope`, but Chrome's extension runtime does not. TypeScript compiles fine because `lib.webworker.d.ts` includes the type; the error only surfaces at runtime.
+
+**Context:** The hybrid worker architecture requires both a SharedWorker (single SQLite connection across tabs) and a Dedicated Worker (OPFS `createSyncAccessHandle()` access). The original approach had the SharedWorker spawn the Dedicated Worker directly.
+
+**Solution:** Following [Notion's WASM SQLite architecture](https://www.notion.com/blog/how-we-sped-up-notion-in-the-browser-with-wasm-sqlite), the **UI thread** creates the Dedicated Worker and bridges it to the SharedWorker via `MessageChannel` port transfer:
+
+```
+1. UI creates SharedWorker, sends { action: 'init' }
+2. SharedWorker has no worker port → responds { needsWorker: true }
+3. UI creates Dedicated Worker + MessageChannel
+4. UI transfers channel.port2 to Dedicated Worker: worker.postMessage(data, [port])
+5. UI transfers channel.port1 to SharedWorker: sharedPort.postMessage(data, [port])
+6. SharedWorker receives port, sends init through it to Dedicated Worker
+7. Dedicated Worker initializes SQLite, responds ready
+8. SharedWorker confirms init to UI
+9. All subsequent queries: UI → SharedWorker → (via port) → Dedicated Worker
+```
+
+**Port transfer syntax:** Ports go in the transfer list (2nd arg to `postMessage`), not in the message data. The receiver gets them via `event.ports[0]`.
+
+**Second tab connects:** SharedWorker already has a working worker port, responds to `init` with `{ ready: true }` immediately. No second Dedicated Worker is created.
+
+**Tab that created the Worker closes:** The Dedicated Worker dies. SharedWorker's port goes dead. Subsequent requests time out (10s). On next `initDbClient()` call, SharedWorker responds `needsWorker: true` again and a fresh Worker is created.
+
+See `docs/pitfalls/shared-worker-cannot-spawn-workers.md` for full details.
