@@ -7,6 +7,8 @@ import { SearchPanel } from './search/SearchPanel';
 import { QueryPanel } from './query/QueryPanel';
 import { LLMPanel } from './llm/LLMPanel';
 import { SettingsPanel } from './settings/SettingsPanel';
+import { NotesPanel } from './notes/NotesPanel';
+import { IntelligencePanel } from './intelligence/IntelligencePanel';
 
 export function ActivePanel() {
   const activePanel = useUIStore((s) => s.activePanel);
@@ -24,6 +26,10 @@ export function ActivePanel() {
       return <QueryPanel />;
     case 'llm':
       return <LLMPanel />;
+    case 'notes':
+      return <NotesPanel />;
+    case 'intelligence':
+      return <IntelligencePanel />;
     case 'settings':
       return <SettingsPanel />;
     default:

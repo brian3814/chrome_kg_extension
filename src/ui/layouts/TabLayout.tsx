@@ -3,6 +3,7 @@ import { Header } from '../components/Header';
 import { KnowledgeGraph } from '../components/graph/KnowledgeGraph';
 import { ActivePanel } from '../components/ActivePanel';
 import { ChatBot } from '../components/chat/ChatBot';
+import { RelatedWidget } from '../components/RelatedWidget';
 import { useUIStore } from '../../graph/store/ui-store';
 
 export function TabLayout() {

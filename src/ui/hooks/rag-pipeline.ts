@@ -1,0 +1,233 @@
+/**
+ * RAG (Retrieval-Augmented Generation) pipeline for graph-aware question answering.
+ *
+ * Steps:
+ * 1. Extract search terms from user question
+ * 2. FTS/LIKE query to find relevant nodes
+ * 3. Graph traversal to expand to 1-2 hop connected subgraph
+ * 4. Retrieve stored source content for matching nodes
+ * 5. Format structured context for LLM
+ */
+
+import { nodes as nodesApi, edges as edgesApi, sourceContent } from '../../db/client/db-client';
+import { useGraphStore } from '../../graph/store/graph-store';
+import type { DbNode, DbEdge, DbSourceContent } from '../../shared/types';
+
+export interface RAGContext {
+  relevantNodes: DbNode[];
+  relevantEdges: DbEdge[];
+  sourceExcerpts: Array<{
+    nodeId: string;
+    nodeLabel: string;
+    url: string;
+    title: string | null;
+    excerpt: string;
+  }>;
+  query: string;
+}
+
+/** Extract search terms from a natural language question */
+function extractSearchTerms(question: string): string[] {
+  const stopWords = new Set([
+    'what', 'who', 'where', 'when', 'why', 'how', 'is', 'are', 'was', 'were',
+    'do', 'does', 'did', 'have', 'has', 'had', 'can', 'could', 'would', 'should',
+    'will', 'shall', 'may', 'might', 'the', 'a', 'an', 'and', 'or', 'but', 'in',
+    'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'about', 'between',
+    'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down',
+    'i', 'me', 'my', 'we', 'our', 'you', 'your', 'they', 'them', 'their',
+    'it', 'its', 'this', 'that', 'these', 'those', 'know', 'tell', 'give',
+    'find', 'show', 'get', 'all', 'any', 'some', 'every', 'each', 'much',
+    'many', 'more', 'most', 'other', 'another', 'such', 'no', 'not', 'only',
+    'very', 'just', 'also', 'than', 'too', 'so', 'if', 'then', 'because',
+    'while', 'although', 'though', 'even', 'still', 'already', 'yet',
+  ]);
+
+  // Extract quoted phrases first
+  const quotedPhrases: string[] = [];
+  const withoutQuotes = question.replace(/"([^"]+)"/g, (_, phrase) => {
+    quotedPhrases.push(phrase.trim());
+    return '';
+  });
+
+  // Then extract individual significant words
+  const words = withoutQuotes
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !stopWords.has(w));
+
+  return [...quotedPhrases, ...words];
+}
+
+/** Search for nodes matching the extracted terms */
+async function findRelevantNodes(terms: string[], limit = 30): Promise<DbNode[]> {
+  const nodeSet = new Map<string, DbNode>();
+
+  for (const term of terms) {
+    const results = await nodesApi.search(term, limit);
+    for (const node of results) {
+      nodeSet.set(node.id, node);
+    }
+  }
+
+  return Array.from(nodeSet.values());
+}
+
+/** Expand to connected subgraph (1-2 hops) */
+async function expandSubgraph(
+  nodeIds: string[],
+  hops = 1
+): Promise<{ expandedNodeIds: string[]; subgraphEdges: DbEdge[] }> {
+  const allNodeIds = new Set(nodeIds);
+  const allEdges: DbEdge[] = [];
+
+  // Get edges for the initial set of nodes
+  for (const nodeId of nodeIds) {
+    const nodeEdges: DbEdge[] = await edgesApi.getForNode(nodeId);
+    for (const edge of nodeEdges) {
+      allEdges.push(edge);
+      allNodeIds.add(edge.source_id);
+      allNodeIds.add(edge.target_id);
+    }
+  }
+
+  // For 2-hop: expand one more level
+  if (hops >= 2) {
+    const secondHopIds = Array.from(allNodeIds).filter((id) => !nodeIds.includes(id));
+    for (const nodeId of secondHopIds.slice(0, 20)) { // limit second hop expansion
+      const nodeEdges: DbEdge[] = await edgesApi.getForNode(nodeId);
+      for (const edge of nodeEdges) {
+        if (!allEdges.some((e) => e.id === edge.id)) {
+          allEdges.push(edge);
+        }
+        allNodeIds.add(edge.source_id);
+        allNodeIds.add(edge.target_id);
+      }
+    }
+  }
+
+  return {
+    expandedNodeIds: Array.from(allNodeIds),
+    subgraphEdges: allEdges,
+  };
+}
+
+/** Retrieve source content for nodes */
+async function getSourceExcerpts(
+  nodeIds: string[],
+  nodeMap: Map<string, DbNode>,
+  maxExcerptLength = 1000
+): Promise<RAGContext['sourceExcerpts']> {
+  const excerpts: RAGContext['sourceExcerpts'] = [];
+
+  for (const nodeId of nodeIds.slice(0, 15)) { // limit to 15 sources
+    try {
+      const sc: DbSourceContent | null = await sourceContent.getByNodeId(nodeId);
+      if (sc?.content) {
+        const node = nodeMap.get(nodeId);
+        excerpts.push({
+          nodeId,
+          nodeLabel: node?.label ?? 'Unknown',
+          url: sc.url,
+          title: sc.title,
+          excerpt: sc.content.slice(0, maxExcerptLength),
+        });
+      }
+    } catch {
+      // Source content not available for this node
+    }
+  }
+
+  return excerpts;
+}
+
+/** Full RAG retrieval: search → expand → fetch sources */
+export async function retrieveRAGContext(question: string): Promise<RAGContext> {
+  const terms = extractSearchTerms(question);
+
+  // Find relevant nodes
+  const matchedNodes = await findRelevantNodes(terms);
+  const matchedNodeIds = matchedNodes.map((n) => n.id);
+
+  // Expand to connected subgraph
+  const { expandedNodeIds, subgraphEdges } = await expandSubgraph(matchedNodeIds, 1);
+
+  // Fetch full node data for expanded set
+  const allNodes = await nodesApi.getAll() as DbNode[];
+  const nodeMap = new Map(allNodes.map((n) => [n.id, n]));
+  const relevantNodes = expandedNodeIds
+    .map((id) => nodeMap.get(id))
+    .filter((n): n is DbNode => n !== undefined);
+
+  // Get source excerpts
+  const sourceExcerpts = await getSourceExcerpts(matchedNodeIds, nodeMap);
+
+  return {
+    relevantNodes,
+    relevantEdges: subgraphEdges,
+    sourceExcerpts,
+    query: question,
+  };
+}
+
+/** Format RAG context as a prompt for the LLM */
+export function formatRAGPrompt(context: RAGContext): string {
+  const parts: string[] = [];
+
+  parts.push(`User question: "${context.query}"`);
+  parts.push('');
+
+  // Entities found
+  if (context.relevantNodes.length > 0) {
+    parts.push('## Relevant entities in the knowledge graph:');
+    for (const node of context.relevantNodes.slice(0, 30)) {
+      let props = '';
+      try {
+        const p = JSON.parse(node.properties);
+        const entries = Object.entries(p).filter(([k]) => k !== 'content' && k !== 'wikiLinks');
+        if (entries.length > 0) {
+          props = ' | ' + entries.map(([k, v]) => `${k}: ${v}`).join(', ');
+        }
+      } catch {}
+      parts.push(`- [${node.type}] ${node.label}${props}${node.source_url ? ` (source: ${node.source_url})` : ''}`);
+    }
+    parts.push('');
+  }
+
+  // Relationships
+  if (context.relevantEdges.length > 0) {
+    parts.push('## Relationships:');
+    const nodeMap = new Map(context.relevantNodes.map((n) => [n.id, n.label]));
+    for (const edge of context.relevantEdges.slice(0, 30)) {
+      const src = nodeMap.get(edge.source_id) ?? edge.source_id;
+      const tgt = nodeMap.get(edge.target_id) ?? edge.target_id;
+      parts.push(`- ${src} --[${edge.label}]--> ${tgt}`);
+    }
+    parts.push('');
+  }
+
+  // Source content
+  if (context.sourceExcerpts.length > 0) {
+    parts.push('## Source content excerpts:');
+    for (const excerpt of context.sourceExcerpts) {
+      parts.push(`### ${excerpt.title ?? excerpt.nodeLabel} [Source: ${excerpt.url}]`);
+      parts.push(excerpt.excerpt);
+      parts.push('');
+    }
+  }
+
+  return parts.join('\n');
+}
+
+export const RAG_SYSTEM_PROMPT = `You are a knowledge graph assistant. The user has a personal knowledge graph built from web pages, notes, and documents they've read.
+
+Given the user's question and the retrieved context from their knowledge graph (entities, relationships, and source excerpts), provide a clear, accurate, and helpful answer.
+
+Rules:
+- Answer based ONLY on the provided context. If the context doesn't contain enough information, say so.
+- Use inline citations: [Source: url] when referencing specific source material.
+- Structure your answer with clear paragraphs. Use markdown formatting (bold, lists, headers) when helpful.
+- If multiple sources provide relevant information, synthesize them into a coherent answer.
+- Mention specific entities and relationships from the graph when relevant.
+- Keep answers concise but thorough. Aim for 2-5 paragraphs depending on complexity.
+- If the question asks about connections or relationships, trace the graph paths explicitly.`;

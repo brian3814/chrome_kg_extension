@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useUIStore } from '../../../graph/store/ui-store';
-import { useChatQuery } from '../../hooks/useChatQuery';
+import { useChatQuery, type ChatMode } from '../../hooks/useChatQuery';
 import { ChatMessage } from './ChatMessage';
 
 export function ChatBot() {
   const { chatOpen, chatDisplayMode, toggleChat, setChatDisplayMode } = useUIStore();
-  const { messages, sendMessage, clearHistory, isProcessing } = useChatQuery();
+  const { messages, sendMessage, clearHistory, isProcessing, mode, setMode } = useChatQuery();
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const displayMode = useUIStore((s) => s.displayMode);
@@ -34,22 +34,27 @@ export function ChatBot() {
     );
   }
 
+  const headerProps = {
+    onClose: toggleChat,
+    onClear: clearHistory,
+    chatDisplayMode,
+    onToggleMode: () => setChatDisplayMode(chatDisplayMode === 'float' ? 'sidebar' : 'float'),
+    mode,
+    onModeChange: setMode,
+  };
+
   // Sidebar mode: rendered inline by the layout, not fixed
   if (chatDisplayMode === 'sidebar') {
     return (
       <div className="flex flex-col h-full bg-zinc-900 border-l border-zinc-700">
-        <ChatHeader
-          onClose={toggleChat}
-          onClear={clearHistory}
-          chatDisplayMode={chatDisplayMode}
-          onToggleMode={() => setChatDisplayMode('float')}
-        />
+        <ChatHeader {...headerProps} />
         <ChatMessages messages={messages} messagesEndRef={messagesEndRef} />
         <ChatInput
           input={input}
           setInput={setInput}
           onSubmit={handleSubmit}
           isProcessing={isProcessing}
+          mode={mode}
         />
       </div>
     );
@@ -62,18 +67,14 @@ export function ChatBot() {
         isSidePanel ? 'w-[calc(100vw-2rem)] h-[60vh]' : 'w-96 h-[500px]'
       }`}
     >
-      <ChatHeader
-        onClose={toggleChat}
-        onClear={clearHistory}
-        chatDisplayMode={chatDisplayMode}
-        onToggleMode={() => setChatDisplayMode('sidebar')}
-      />
+      <ChatHeader {...headerProps} />
       <ChatMessages messages={messages} messagesEndRef={messagesEndRef} />
       <ChatInput
         input={input}
         setInput={setInput}
         onSubmit={handleSubmit}
         isProcessing={isProcessing}
+        mode={mode}
       />
     </div>
   );
@@ -84,15 +85,39 @@ function ChatHeader({
   onClear,
   chatDisplayMode,
   onToggleMode,
+  mode,
+  onModeChange,
 }: {
   onClose: () => void;
   onClear: () => void;
   chatDisplayMode: 'float' | 'sidebar';
   onToggleMode: () => void;
+  mode: ChatMode;
+  onModeChange: (m: ChatMode) => void;
 }) {
   return (
     <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-700 shrink-0">
-      <span className="text-sm font-medium text-zinc-200">Ask your graph</span>
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-medium text-zinc-200">Ask</span>
+        <div className="flex bg-zinc-800 rounded p-0.5">
+          <button
+            onClick={() => onModeChange('smart')}
+            className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
+              mode === 'smart' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Smart
+          </button>
+          <button
+            onClick={() => onModeChange('dsl')}
+            className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
+              mode === 'dsl' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            DSL
+          </button>
+        </div>
+      </div>
       <div className="flex items-center gap-1">
         <button
           onClick={onToggleMode}
@@ -150,19 +175,25 @@ function ChatInput({
   setInput,
   onSubmit,
   isProcessing,
+  mode,
 }: {
   input: string;
   setInput: (v: string) => void;
   onSubmit: (e: React.FormEvent) => void;
   isProcessing: boolean;
+  mode: ChatMode;
 }) {
+  const placeholder = mode === 'smart'
+    ? 'What do I know about...?'
+    : 'Find all nodes where...';
+
   return (
     <form onSubmit={onSubmit} className="flex gap-2 p-3 border-t border-zinc-700 shrink-0">
       <input
         type="text"
         value={input}
         onChange={(e) => setInput(e.target.value)}
-        placeholder="Ask about your graph..."
+        placeholder={placeholder}
         className="flex-1 bg-zinc-800 text-sm text-zinc-100 px-3 py-1.5 rounded border border-zinc-700 focus:border-indigo-500 focus:outline-none"
         disabled={isProcessing}
       />
@@ -171,7 +202,7 @@ function ChatInput({
         disabled={isProcessing || !input.trim()}
         className="bg-indigo-600 text-white text-sm px-3 py-1.5 rounded hover:bg-indigo-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {isProcessing ? '...' : 'Send'}
+        {isProcessing ? '...' : 'Ask'}
       </button>
     </form>
   );

@@ -10,6 +10,7 @@ export function handleMessage(
   // Broadcast messages from offscreen — SW should ignore them
   if (message.type === 'LLM_STREAM_CHUNK') return false;
   if (message.type === 'AGENT_PROGRESS') return false;
+  if (message.type === 'PAGE_TERMS') return false; // Let UI pick up directly
 
   // Handle async responses
   handleMessageAsync(message, sender).then(sendResponse).catch((e) => {

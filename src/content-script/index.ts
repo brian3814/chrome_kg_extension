@@ -1,4 +1,4 @@
-import { extractPageContent, getSelectedText } from './page-extractor';
+import { extractPageContent, getSelectedText, extractPageTerms } from './page-extractor';
 import { executeTool } from './tool-executor';
 
 // Listen for messages from the service worker
@@ -41,6 +41,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       } catch (e: any) {
         sendResponse({ result: '', error: e.message });
       }
+      break;
+    }
+
+    case 'EXTRACT_PAGE_TERMS': {
+      const pageTerms = extractPageTerms();
+      chrome.runtime.sendMessage({
+        type: 'PAGE_TERMS',
+        payload: pageTerms,
+        source: 'content-script',
+        timestamp: Date.now(),
+      });
+      sendResponse({ success: true });
       break;
     }
 

@@ -1,6 +1,9 @@
 import { exec, query, checkModuleAvailable } from '../sqlite-engine';
 import * as migration001 from './001-initial-schema';
 import * as migration002 from './002-fts-index';
+import * as migration003 from './003-source-content';
+import * as migration004 from './004-indexed-files';
+import * as migration005 from './005-note-node-type';
 
 interface Migration {
   version: number;
@@ -9,7 +12,7 @@ interface Migration {
   optional?: boolean;
 }
 
-const migrations: Migration[] = [migration001, migration002];
+const migrations: Migration[] = [migration001, migration002, migration003, migration004, migration005];
 
 // Track whether FTS5 is available for search queries
 let fts5Available = false;

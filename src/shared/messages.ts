@@ -174,6 +174,20 @@ export interface MutationExecuteMessage extends ExtensionMessage {
   };
 }
 
+// Contextual relevance messages (Phase 4)
+export interface ExtractPageTermsMessage extends ExtensionMessage {
+  type: 'EXTRACT_PAGE_TERMS';
+}
+
+export interface PageTermsMessage extends ExtensionMessage {
+  type: 'PAGE_TERMS';
+  payload: {
+    url: string;
+    title: string;
+    terms: string[];
+  };
+}
+
 // Union of all chrome.runtime messages
 export type RuntimeMessage =
   | PageContentMessage
@@ -192,7 +206,9 @@ export type RuntimeMessage =
   | AgentRunStartMessage
   | ToolExecuteMessage
   | ToolResultMessage
-  | AgentProgressMessage;
+  | AgentProgressMessage
+  | ExtractPageTermsMessage
+  | PageTermsMessage;
 
 // Helper to create messages
 export function createMessage<T extends ExtensionMessage>(

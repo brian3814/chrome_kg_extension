@@ -6,6 +6,9 @@ import { executeQuery, executeExec } from './query-executor';
 import * as nodeQueries from './queries/node-queries';
 import * as edgeQueries from './queries/edge-queries';
 import * as nodeTypeQueries from './queries/node-type-queries';
+import * as sourceContentQueries from './queries/source-content-queries';
+import * as entityResolutionQueries from './queries/entity-resolution-queries';
+import * as indexedFileQueries from './queries/indexed-file-queries';
 import { executeGraphQuery, executeGraphMutation } from './query-engine';
 import { SYNC_CHANNEL, type SyncEvent } from '../../shared/sync-events';
 
@@ -48,6 +51,9 @@ const MUTATION_ACTIONS = new Set([
   'nodes.create', 'nodes.update', 'nodes.delete',
   'edges.create', 'edges.update', 'edges.delete',
   'nodeTypes.create', 'nodeTypes.delete',
+  'sourceContent.save', 'sourceContent.delete',
+  'entityResolution.addAlias', 'entityResolution.removeAlias',
+  'indexedFiles.save', 'indexedFiles.delete', 'indexedFiles.deleteByNodeId',
   'mutation.execute', 'exec', 'reset', 'clearAll',
 ]);
 
@@ -133,6 +139,12 @@ async function handleAction(action: string, params: unknown): Promise<{ result: 
       return { result: await nodeQueries.getNodeTypes() };
     }
 
+    case 'nodes.matchTerms': {
+      ensureInit();
+      const p = params as { terms: string[]; limit?: number };
+      return { result: await nodeQueries.matchTerms(p.terms, p.limit) };
+    }
+
     case 'nodes.getNeighborhood': {
       ensureInit();
       const p = params as { nodeId: string; hops?: number };
@@ -205,6 +217,92 @@ async function handleAction(action: string, params: unknown): Promise<{ result: 
         result: success,
         syncEvent: success ? { type: 'node_type_deleted', nodeTypeId: params as string } : undefined,
       };
+    }
+
+    // Source content operations
+    case 'sourceContent.save': {
+      ensureInit();
+      return { result: await sourceContentQueries.saveSourceContent(params as any) };
+    }
+
+    case 'sourceContent.getByNodeId': {
+      ensureInit();
+      return { result: await sourceContentQueries.getByNodeId(params as string) };
+    }
+
+    case 'sourceContent.getByUrl': {
+      ensureInit();
+      return { result: await sourceContentQueries.getByUrl(params as string) };
+    }
+
+    case 'sourceContent.search': {
+      ensureInit();
+      const p = params as { query: string; limit?: number };
+      return { result: await sourceContentQueries.searchContent(p.query, p.limit) };
+    }
+
+    case 'sourceContent.delete': {
+      ensureInit();
+      return { result: await sourceContentQueries.deleteByNodeId(params as string) };
+    }
+
+    case 'sourceContent.getAll': {
+      ensureInit();
+      return { result: await sourceContentQueries.getAllSourceContent() };
+    }
+
+    // Entity resolution operations
+    case 'entityResolution.findMatches': {
+      ensureInit();
+      const p = params as { label: string; fuzzyThreshold?: number };
+      return { result: await entityResolutionQueries.findMatches(p.label, p.fuzzyThreshold) };
+    }
+
+    case 'entityResolution.addAlias': {
+      ensureInit();
+      const p = params as { nodeId: string; alias: string };
+      return { result: await entityResolutionQueries.addAlias(p.nodeId, p.alias) };
+    }
+
+    case 'entityResolution.getAliases': {
+      ensureInit();
+      return { result: await entityResolutionQueries.getAliases(params as string) };
+    }
+
+    case 'entityResolution.removeAlias': {
+      ensureInit();
+      return { result: await entityResolutionQueries.removeAlias(params as string) };
+    }
+
+    // Indexed file operations
+    case 'indexedFiles.save': {
+      ensureInit();
+      return { result: await indexedFileQueries.saveIndexedFile(params as any) };
+    }
+
+    case 'indexedFiles.getByPath': {
+      ensureInit();
+      return { result: await indexedFileQueries.getByPath(params as string) };
+    }
+
+    case 'indexedFiles.getAll': {
+      ensureInit();
+      return { result: await indexedFileQueries.getAllIndexedFiles() };
+    }
+
+    case 'indexedFiles.delete': {
+      ensureInit();
+      return { result: await indexedFileQueries.deleteByPath(params as string) };
+    }
+
+    case 'indexedFiles.deleteByNodeId': {
+      ensureInit();
+      return { result: await indexedFileQueries.deleteByNodeId(params as string) };
+    }
+
+    case 'indexedFiles.getByNodeId': {
+      ensureInit();
+      return { result: await indexedFileQueries.getByNodeId(params as string) };
     }
 
     // Query engine operations

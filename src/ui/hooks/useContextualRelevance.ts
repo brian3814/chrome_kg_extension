@@ -1,0 +1,129 @@
+import { useState, useEffect, useCallback } from 'react';
+import { nodes as nodesApi } from '../../db/client/db-client';
+import type { DbNode } from '../../shared/types';
+
+export interface RelatedMatch {
+  node: DbNode;
+  matchedTerm: string;
+}
+
+const RELEVANCE_STORAGE_KEY = 'contextualRelevanceEnabled';
+
+export function useContextualRelevance() {
+  const [relatedNodes, setRelatedNodes] = useState<RelatedMatch[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [currentUrl, setCurrentUrl] = useState<string | null>(null);
+  const [enabled, setEnabled] = useState(true);
+
+  // Load preference
+  useEffect(() => {
+    chrome.storage.local.get(RELEVANCE_STORAGE_KEY).then((result: Record<string, any>) => {
+      if (result[RELEVANCE_STORAGE_KEY] !== undefined) {
+        setEnabled(result[RELEVANCE_STORAGE_KEY]);
+      }
+    }).catch(() => {});
+  }, []);
+
+  const toggleEnabled = useCallback(async (value: boolean) => {
+    setEnabled(value);
+    try {
+      await chrome.storage.local.set({ [RELEVANCE_STORAGE_KEY]: value });
+    } catch {}
+    if (!value) {
+      setRelatedNodes([]);
+    }
+  }, []);
+
+  // Listen for PAGE_TERMS messages from content script
+  useEffect(() => {
+    if (!enabled) return;
+
+    const listener = async (message: any) => {
+      if (message.type !== 'PAGE_TERMS') return;
+
+      const { url, terms } = message.payload;
+      if (!terms || terms.length === 0) return;
+
+      setCurrentUrl(url);
+      setLoading(true);
+
+      try {
+        const matched: DbNode[] = await nodesApi.matchTerms(terms, 15);
+
+        if (matched.length > 0) {
+          // Map nodes to the terms they matched
+          const results: RelatedMatch[] = matched.map((node) => {
+            const matchedTerm = terms.find(
+              (t: string) => node.label.toLowerCase().includes(t.toLowerCase())
+            ) ?? terms[0];
+            return { node, matchedTerm };
+          });
+
+          setRelatedNodes(results);
+        } else {
+          setRelatedNodes([]);
+        }
+      } catch (e) {
+        console.warn('[Relevance] Term matching failed:', e);
+        setRelatedNodes([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    chrome.runtime.onMessage.addListener(listener);
+    return () => chrome.runtime.onMessage.removeListener(listener);
+  }, [enabled]);
+
+  // Trigger extraction when active tab changes
+  useEffect(() => {
+    if (!enabled) return;
+
+    const triggerExtraction = async () => {
+      try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        const tab = tabs[0];
+        if (!tab?.id || !tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
+          return;
+        }
+        // Ensure content script is available, then request terms
+        try {
+          await chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_PAGE_TERMS' });
+        } catch {
+          // Content script not injected — try injecting first
+          try {
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              files: ['content-script.js'],
+            });
+            await chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_PAGE_TERMS' });
+          } catch {
+            // Cannot inject (e.g. chrome:// pages)
+          }
+        }
+      } catch {
+        // Tabs API may not be available
+      }
+    };
+
+    // Trigger on mount
+    triggerExtraction();
+
+    // Trigger on tab activation
+    const tabListener = () => {
+      triggerExtraction();
+    };
+
+    try {
+      chrome.tabs.onActivated.addListener(tabListener);
+    } catch {}
+
+    return () => {
+      try {
+        chrome.tabs.onActivated.removeListener(tabListener);
+      } catch {}
+    };
+  }, [enabled]);
+
+  return { relatedNodes, loading, currentUrl, enabled, toggleEnabled };
+}

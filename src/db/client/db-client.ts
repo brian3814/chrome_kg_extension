@@ -125,6 +125,8 @@ export const nodes = {
   getTypes: () => sendRequest('nodes.getTypes') as Promise<string[]>,
   getNeighborhood: (nodeId: string, hops?: number) =>
     sendRequest('nodes.getNeighborhood', { nodeId, hops }) as Promise<{ nodeIds: string[] }>,
+  matchTerms: (terms: string[], limit?: number) =>
+    sendRequest('nodes.matchTerms', { terms, limit }) as Promise<any[]>,
 };
 
 // Typed edge operations
@@ -145,6 +147,50 @@ export const nodeTypes = {
   create: (input: { type: string; description?: string; color?: string }) =>
     sendRequest('nodeTypes.create', input) as Promise<any>,
   delete: (type: string) => sendRequest('nodeTypes.delete', type) as Promise<boolean>,
+};
+
+// Source content operations
+export const sourceContent = {
+  save: (input: { nodeId?: string; url: string; title?: string; content: string }) =>
+    sendRequest('sourceContent.save', input) as Promise<any>,
+  getByNodeId: (nodeId: string) =>
+    sendRequest('sourceContent.getByNodeId', nodeId) as Promise<any>,
+  getByUrl: (url: string) =>
+    sendRequest('sourceContent.getByUrl', url) as Promise<any>,
+  search: (query: string, limit?: number) =>
+    sendRequest('sourceContent.search', { query, limit }) as Promise<any[]>,
+  delete: (nodeId: string) =>
+    sendRequest('sourceContent.delete', nodeId) as Promise<boolean>,
+  getAll: () =>
+    sendRequest('sourceContent.getAll') as Promise<any[]>,
+};
+
+// Entity resolution operations
+export const entityResolution = {
+  findMatches: (label: string, fuzzyThreshold?: number) =>
+    sendRequest('entityResolution.findMatches', { label, fuzzyThreshold }) as Promise<any[]>,
+  addAlias: (nodeId: string, alias: string) =>
+    sendRequest('entityResolution.addAlias', { nodeId, alias }) as Promise<any>,
+  getAliases: (nodeId: string) =>
+    sendRequest('entityResolution.getAliases', nodeId) as Promise<any[]>,
+  removeAlias: (aliasId: string) =>
+    sendRequest('entityResolution.removeAlias', aliasId) as Promise<boolean>,
+};
+
+// Indexed file operations
+export const indexedFiles = {
+  save: (input: { filePath: string; fileName: string; lastModified: number; contentHash?: string; nodeId?: string }) =>
+    sendRequest('indexedFiles.save', input) as Promise<any>,
+  getByPath: (filePath: string) =>
+    sendRequest('indexedFiles.getByPath', filePath) as Promise<any>,
+  getAll: () =>
+    sendRequest('indexedFiles.getAll') as Promise<any[]>,
+  delete: (filePath: string) =>
+    sendRequest('indexedFiles.delete', filePath) as Promise<boolean>,
+  deleteByNodeId: (nodeId: string) =>
+    sendRequest('indexedFiles.deleteByNodeId', nodeId) as Promise<boolean>,
+  getByNodeId: (nodeId: string) =>
+    sendRequest('indexedFiles.getByNodeId', nodeId) as Promise<any>,
 };
 
 // Query engine operations

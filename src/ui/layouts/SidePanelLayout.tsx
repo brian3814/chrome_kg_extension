@@ -3,6 +3,7 @@ import { Header } from '../components/Header';
 import { KnowledgeGraph } from '../components/graph/KnowledgeGraph';
 import { ActivePanel } from '../components/ActivePanel';
 import { ChatBot } from '../components/chat/ChatBot';
+import { RelatedWidget } from '../components/RelatedWidget';
 import { useUIStore } from '../../graph/store/ui-store';
 
 export function SidePanelLayout() {
@@ -21,6 +22,7 @@ export function SidePanelLayout() {
           </div>
         ) : (
           <>
+            <RelatedWidget />
             <div className={`${activePanel === 'none' ? 'flex-1' : 'h-[45%]'} min-h-0 relative`}>
               <KnowledgeGraph compact />
             </div>

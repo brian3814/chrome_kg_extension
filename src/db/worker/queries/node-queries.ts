@@ -167,6 +167,29 @@ export async function getNeighborhood(
   return { nodeIds: rows.map((r) => r.id) };
 }
 
+/** Fast term matching: find nodes whose labels match any of the given terms */
+export async function matchTerms(
+  terms: string[],
+  limit = 20
+): Promise<DbNode[]> {
+  if (terms.length === 0) return [];
+
+  // Build a query that checks for LIKE matches against each term
+  // Use UNION for efficiency, limited terms to prevent huge queries
+  const limitedTerms = terms.slice(0, 30);
+  const placeholders = limitedTerms.map(() => 'LOWER(label) LIKE ?').join(' OR ');
+  const params = limitedTerms.map((t) => `%${t.toLowerCase()}%`);
+
+  const { rows } = await executeQuery<DbNode>(
+    `SELECT DISTINCT * FROM nodes
+     WHERE ${placeholders}
+     ORDER BY updated_at DESC
+     LIMIT ?;`,
+    [...params, limit]
+  );
+  return rows;
+}
+
 export function generateIdentifier(type: string, label: string): string {
   const slug = label
     .toLowerCase()

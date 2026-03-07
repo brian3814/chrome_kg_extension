@@ -53,6 +53,22 @@ export function Header() {
         </ToolbarButton>
 
         <ToolbarButton
+          active={activePanel === 'notes'}
+          onClick={() => setActivePanel('notes')}
+          title="Notes"
+        >
+          <NoteIcon />
+        </ToolbarButton>
+
+        <ToolbarButton
+          active={activePanel === 'intelligence'}
+          onClick={() => setActivePanel('intelligence')}
+          title="Intelligence"
+        >
+          <BrainIcon />
+        </ToolbarButton>
+
+        <ToolbarButton
           active={chatOpen}
           onClick={toggleChat}
           title="Ask (chat)"
@@ -152,6 +168,20 @@ const SparklesIcon = () => (
 const ChatIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="m3 21 1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z" />
+  </svg>
+);
+
+const NoteIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+  </svg>
+);
+
+const BrainIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2a4 4 0 0 1 4 4 4 4 0 0 1-1 6.5V20a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2v-7.5A4 4 0 0 1 8 6a4 4 0 0 1 4-4z"/>
+    <path d="M8 6a4 4 0 0 0-4 4c0 1.5.8 2.8 2 3.4"/>
+    <path d="M16 6a4 4 0 0 1 4 4c0 1.5-.8 2.8-2 3.4"/>
   </svg>
 );
 

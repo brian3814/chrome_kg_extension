@@ -48,6 +48,27 @@ export interface DbExtractionLog {
   created_at: string;
 }
 
+export interface DbSourceContent {
+  id: string;
+  node_id: string | null;
+  url: string;
+  title: string | null;
+  content: string;
+  content_hash: string | null;
+  extracted_at: string;
+  created_at: string;
+}
+
+export interface DbIndexedFile {
+  id: string;
+  file_path: string;
+  file_name: string;
+  last_modified: number;
+  content_hash: string | null;
+  node_id: string | null;
+  indexed_at: string;
+}
+
 // Application types (parsed from DB rows)
 export interface GraphNode {
   id: string;
@@ -124,6 +145,22 @@ export interface UpdateEdgeInput {
   type?: string;
   properties?: Record<string, unknown>;
   weight?: number;
+}
+
+// Source content input
+export interface CreateSourceContentInput {
+  nodeId?: string;
+  url: string;
+  title?: string;
+  content: string;
+}
+
+// Entity resolution types
+export interface EntityMatch {
+  nodeId: string;
+  label: string;
+  matchType: 'exact' | 'alias' | 'fuzzy';
+  similarity: number;
 }
 
 // LLM types

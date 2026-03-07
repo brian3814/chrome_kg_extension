@@ -2,7 +2,8 @@ import { useCallback } from 'react';
 import { useLLMStore } from '../../graph/store/llm-store';
 import { useGraphStore } from '../../graph/store/graph-store';
 import { extractionResultSchema } from '../../shared/schema';
-import type { DiffItem, AgentProgressEvent } from '../../shared/types';
+import { entityResolution, sourceContent } from '../../db/client/db-client';
+import type { DiffItem, AgentProgressEvent, EntityMatch } from '../../shared/types';
 
 function streamFromOffscreen(
   requestId: string,
@@ -31,6 +32,68 @@ function streamFromOffscreen(
 
     chrome.runtime.onMessage.addListener(listener);
   });
+}
+
+async function buildDiffItems(
+  validated: { nodes: Array<{ label: string; type: string; properties?: Record<string, unknown> }>; edges: Array<{ sourceLabel: string; targetLabel: string; label: string; type?: string }> }
+): Promise<DiffItem[]> {
+  const graph = useGraphStore.getState();
+  const items: DiffItem[] = [];
+
+  for (const node of validated.nodes) {
+    // First try in-memory exact match
+    const inMemoryMatch = graph.nodes.find(
+      (n) => n.label.toLowerCase() === node.label.toLowerCase()
+    );
+
+    if (inMemoryMatch) {
+      items.push({
+        action: 'merge',
+        type: 'node',
+        extracted: node,
+        existingMatch: inMemoryMatch,
+        accepted: true,
+      });
+      continue;
+    }
+
+    // Try DB-level entity resolution (alias + fuzzy matching)
+    try {
+      const matches: EntityMatch[] = await entityResolution.findMatches(node.label);
+      if (matches.length > 0) {
+        const bestMatch = matches[0];
+        const existingNode = graph.nodes.find((n) => n.id === bestMatch.nodeId);
+        items.push({
+          action: 'merge',
+          type: 'node',
+          extracted: node,
+          existingMatch: existingNode ?? undefined,
+          accepted: true,
+        });
+        continue;
+      }
+    } catch {
+      // DB not ready or entity resolution failed, fall through to 'add'
+    }
+
+    items.push({
+      action: 'add',
+      type: 'node',
+      extracted: node,
+      accepted: true,
+    });
+  }
+
+  for (const edge of validated.edges) {
+    items.push({
+      action: 'add',
+      type: 'edge',
+      extracted: edge,
+      accepted: true,
+    });
+  }
+
+  return items;
 }
 
 export function useLLMExtraction() {
@@ -93,30 +156,7 @@ export function useLLMExtraction() {
       const parsed = JSON.parse(jsonMatch[0]);
       const validated = extractionResultSchema.parse(parsed);
 
-      const graph = useGraphStore.getState();
-      const items: DiffItem[] = [];
-
-      for (const node of validated.nodes) {
-        const existing = graph.nodes.find(
-          (n) => n.label.toLowerCase() === node.label.toLowerCase()
-        );
-        items.push({
-          action: existing ? 'merge' : 'add',
-          type: 'node',
-          extracted: node,
-          existingMatch: existing,
-          accepted: true,
-        });
-      }
-
-      for (const edge of validated.edges) {
-        items.push({
-          action: 'add',
-          type: 'edge',
-          extracted: edge,
-          accepted: true,
-        });
-      }
+      const items = await buildDiffItems(validated);
 
       // Complete parse step
       useLLMStore.getState().completeCurrentStep();
@@ -158,6 +198,14 @@ export function useLLMExtraction() {
           }
         } else if (item.existingMatch) {
           nodeIdMap.set(extracted.label.toLowerCase(), item.existingMatch.id);
+          // Register the extracted label as an alias if it differs from the existing label
+          if (extracted.label.toLowerCase() !== item.existingMatch.label.toLowerCase()) {
+            try {
+              await entityResolution.addAlias(item.existingMatch.id, extracted.label);
+            } catch {
+              // Alias may already exist, ignore
+            }
+          }
         }
       }
 
@@ -188,6 +236,25 @@ export function useLLMExtraction() {
             type: extracted.type,
             sourceUrl: llm.sourceUrl ?? undefined,
           });
+        }
+      }
+
+      // Save source content if we have text and a URL
+      if (llm.sourceUrl && llm.inputText) {
+        try {
+          // Find or create the resource node for this URL
+          const resourceNodeId = nodeIdMap.get(llm.sourceUrl.toLowerCase())
+            ?? useGraphStore.getState().nodes.find(
+              (n) => n.sourceUrl === llm.sourceUrl && n.type === 'resource'
+            )?.id;
+
+          await sourceContent.save({
+            nodeId: resourceNodeId,
+            url: llm.sourceUrl,
+            content: llm.inputText,
+          });
+        } catch (e) {
+          console.warn('[Extraction] Failed to save source content:', e);
         }
       }
 
@@ -240,7 +307,7 @@ export function useLLMExtraction() {
     });
 
     // Listen for AGENT_PROGRESS events
-    const listener = (message: any) => {
+    const listener = async (message: any) => {
       if (message.type !== 'AGENT_PROGRESS' || message.payload?.runId !== runId) return;
 
       const event: AgentProgressEvent = message.payload.event;
@@ -274,30 +341,7 @@ export function useLLMExtraction() {
           chrome.runtime.onMessage.removeListener(listener);
           if (event.extractionResult) {
             const validated = extractionResultSchema.parse(event.extractionResult);
-            const graph = useGraphStore.getState();
-            const items: DiffItem[] = [];
-
-            for (const node of validated.nodes) {
-              const existing = graph.nodes.find(
-                (n) => n.label.toLowerCase() === node.label.toLowerCase()
-              );
-              items.push({
-                action: existing ? 'merge' : 'add',
-                type: 'node',
-                extracted: node,
-                existingMatch: existing,
-                accepted: true,
-              });
-            }
-            for (const edge of validated.edges) {
-              items.push({
-                action: 'add',
-                type: 'edge',
-                extracted: edge,
-                accepted: true,
-              });
-            }
-
+            const items = await buildDiffItems(validated);
             useLLMStore.getState().setDiff({ items });
             useLLMStore.getState().setStatus('extracted');
           }
