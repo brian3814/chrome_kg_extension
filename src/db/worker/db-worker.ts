@@ -298,7 +298,9 @@ async function handleAction(action: string, params: unknown): Promise<{ result: 
   }
 }
 
-self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
+let messageTarget: { postMessage: (msg: any) => void } = self;
+
+async function handleMessage(event: MessageEvent<WorkerRequest>) {
   const { requestId, action, params } = event.data;
 
   try {
@@ -310,7 +312,7 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
       data: outcome.result,
       syncEvent: outcome.syncEvent,
     };
-    self.postMessage(response);
+    messageTarget.postMessage(response);
   } catch (error: any) {
     console.error(`[DB Worker] Error handling ${action}:`, error);
     const response: WorkerResponse = {
@@ -318,9 +320,24 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
       success: false,
       error: error.message ?? String(error),
     };
-    self.postMessage(response);
+    messageTarget.postMessage(response);
   }
+}
+
+self.onmessage = (event: MessageEvent) => {
+  // Check for coordinator port attachment
+  if (event.data?.action === '__attach_port__' && event.ports?.length > 0) {
+    const coordinatorPort = event.ports[0];
+    messageTarget = coordinatorPort;
+    coordinatorPort.onmessage = handleMessage;
+    coordinatorPort.start();
+    console.log('[DB Worker] Coordinator port attached');
+    return;
+  }
+
+  // Default: handle as normal request
+  handleMessage(event);
 };
 
-// Signal that the worker is loaded
+// Signal that the worker script has loaded
 self.postMessage({ requestId: '__init__', success: true, data: 'worker-loaded' });

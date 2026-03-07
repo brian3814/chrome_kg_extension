@@ -20,7 +20,7 @@
     "default_title": "Knowledge Graph"
   },
   "side_panel": {
-    "default_path": "index.html"
+    "default_path": "index.html?mode=sidePanel"
   },
   "background": {
     "service_worker": "service-worker.js",

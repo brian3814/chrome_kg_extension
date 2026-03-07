@@ -1,31 +1,16 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import type { DisplayMode } from '../../shared/types';
-import { DISPLAY_MODE_STORAGE_KEY, SIDE_PANEL_WIDTH_THRESHOLD } from '../../shared/constants';
+import { DISPLAY_MODE_STORAGE_KEY } from '../../shared/constants';
+
+function getDisplayMode(): DisplayMode {
+  const params = new URLSearchParams(window.location.search);
+  const mode = params.get('mode');
+  if (mode === 'tab' || mode === 'sidePanel') return mode;
+  return 'sidePanel';
+}
 
 export function useDisplayMode() {
-  const [displayMode, setDisplayMode] = useState<DisplayMode>(() => {
-    // Check URL param first
-    const params = new URLSearchParams(window.location.search);
-    const mode = params.get('mode');
-    if (mode === 'tab' || mode === 'sidePanel') return mode;
-
-    // Heuristic: side panel is typically narrow
-    return window.innerWidth < SIDE_PANEL_WIDTH_THRESHOLD ? 'sidePanel' : 'tab';
-  });
-
-  useEffect(() => {
-    const handleResize = () => {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('mode')) return; // Don't override explicit mode
-
-      const newMode: DisplayMode =
-        window.innerWidth < SIDE_PANEL_WIDTH_THRESHOLD ? 'sidePanel' : 'tab';
-      setDisplayMode(newMode);
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  const [displayMode] = useState<DisplayMode>(getDisplayMode);
 
   const toggleMode = useCallback(async () => {
     const newMode: DisplayMode =
@@ -38,15 +23,16 @@ export function useDisplayMode() {
       // Not in extension context
     }
 
-    // Ask service worker to open the other view
+    // Ask service worker to open the new view, then close this one
     try {
       await chrome.runtime.sendMessage({
         type: 'TOGGLE_DISPLAY_MODE',
         payload: { currentMode: displayMode },
       });
+      // New view is open — close current view (side panel or tab)
+      window.close();
     } catch (e) {
-      // Fallback: just change mode in-place
-      setDisplayMode(newMode);
+      // Not in extension context
     }
   }, [displayMode]);
 

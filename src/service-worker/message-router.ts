@@ -1,5 +1,6 @@
 import { ensureOffscreenDocument } from './offscreen-manager';
-import { openExtensionTab, closeExtensionTab } from './tab-manager';
+import { openExtensionTab } from './tab-manager';
+import { openSidePanel } from './sidepanel-manager';
 import type { RuntimeMessage } from '../shared/messages';
 
 export function handleMessage(
@@ -49,16 +50,15 @@ async function handleMessageAsync(
     case 'TOGGLE_DISPLAY_MODE': {
       const payload = message.payload as { currentMode: 'sidePanel' | 'tab' };
       if (payload.currentMode === 'sidePanel') {
-        // Side panel → tab: open tab (no user gesture needed for tabs)
         await openExtensionTab();
       } else {
-        // Tab → side panel: preference is already saved by the UI.
-        // sidePanel.open() requires a user gesture so we can't call it here.
-        // The storage listener in index.ts will set openPanelOnActionClick=true,
-        // so the user just clicks the icon to open the side panel.
-        // Close the current tab to complete the switch.
-        await closeExtensionTab();
+        // Open side panel on the sender's window
+        const windowId = sender.tab?.windowId;
+        if (windowId) {
+          await openSidePanel(windowId);
+        }
       }
+      // UI closes itself via window.close() after this response
       return { success: true };
     }
 

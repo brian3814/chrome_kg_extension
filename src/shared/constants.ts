@@ -43,8 +43,6 @@ export const OFFSCREEN_KEEPALIVE_INTERVAL_MS = 20_000;
 export const DISPLAY_MODE_STORAGE_KEY = 'displayMode';
 export const LLM_CONFIG_STORAGE_KEY = 'llmConfig';
 
-export const SIDE_PANEL_WIDTH_THRESHOLD = 500;
-
 export const LAYOUT_OPTIONS = [
   { id: 'forceDirected2d', label: 'Force Directed 2D' },
   { id: 'forceDirected3d', label: 'Force Directed 3D' },

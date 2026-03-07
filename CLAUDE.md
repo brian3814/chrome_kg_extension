@@ -23,7 +23,7 @@ Five execution contexts, each with different capabilities:
 
 - **Service Worker** (`src/service-worker/`) — Ephemeral message router. No DOM. Registers context menus, manages side panel behavior, routes messages between contexts. Must not use dynamic imports (Vite's modulePreload polyfill references `document`).
 - **Side Panel / Tab** (`src/ui/`) — React 19 SPA. Same `index.html` serves both. Renders graph via Reagraph, manages state via Zustand stores in `src/graph/store/`.
-- **DB SharedWorker** (`src/db/worker/`) — SharedWorker running wa-sqlite with IDB VFS (OPFS is unavailable in SharedWorkers — see Pitfall #11 in `ARCHITECTURE.md`). All SQLite calls go through a serial promise queue (`sqlite-engine.ts:serialize()`) to prevent Asyncify WASM corruption from concurrent operations.
+- **DB SharedWorker** (`src/db/worker/`) — Pure coordinator/router. Does not run SQLite directly. The UI thread creates the Dedicated Worker (which holds SQLite with OPFS) and bridges it to the SharedWorker via a `MessageChannel`. The SharedWorker routes requests from all tab ports to the single Dedicated Worker port and broadcasts sync events. This pattern is necessary because `Worker` is not available in `SharedWorkerGlobalScope` in Chrome extensions. All SQLite calls go through a serial promise queue (`sqlite-engine.ts:serialize()`) to prevent Asyncify WASM corruption from concurrent operations.
 - **Offscreen Document** (`src/offscreen/`) — Hidden page for long-running LLM streaming calls that outlive the service worker's 30s/5min lifecycle.
 - **Content Script** (`src/content-script/`) — Extracts page text via @mozilla/readability. Built as IIFE (separate Vite build pass).
 
@@ -72,3 +72,5 @@ All shared data types are in `src/shared/types.ts`: `DbNode`, `DbEdge`, `GraphNo
 ## Detailed Documentation
 
 See `ARCHITECTURE.md` for the full system design, SQLite schema, and comprehensive pitfall documentation.
+
+See `docs/pitfalls/shared-worker-cannot-spawn-workers.md` for why the SharedWorker cannot create Dedicated Workers in Chrome extensions and how the UI-created worker + MessageChannel bridge pattern solves it.

@@ -31,8 +31,6 @@ export function initDbClient(): Promise<void> {
 
   initPromise = new Promise((resolve, reject) => {
     try {
-      // Use SharedWorker so all tabs/panels share a single SQLite handle.
-      // This prevents OPFS corruption from concurrent Dedicated Workers.
       const workerUrl = new URL('/db-shared-worker.js', location.origin).href;
       sharedWorker = new SharedWorker(workerUrl, { type: 'module' });
       port = sharedWorker.port;
@@ -40,8 +38,9 @@ export function initDbClient(): Promise<void> {
       port.onmessage = (event: MessageEvent<WorkerResponse>) => {
         const { requestId, success, data, error } = event.data;
 
-        // Handle the initial worker-connected signal
-        if (requestId === '__init__') {
+        // SharedWorker is asking us to create the Dedicated Worker
+        if (requestId === '__needs_worker__') {
+          spawnAndAttachWorker();
           return;
         }
 
@@ -65,7 +64,7 @@ export function initDbClient(): Promise<void> {
 
       port.start();
 
-      // Send init command
+      // Send init — SharedWorker will either respond ready or ask us to create a worker
       sendRequest('init').then(() => {
         console.log('[DB Client] Database initialized via SharedWorker');
         resolve();
@@ -76,6 +75,26 @@ export function initDbClient(): Promise<void> {
   });
 
   return initPromise;
+}
+
+function spawnAndAttachWorker(): void {
+  const dbWorkerUrl = new URL('/db-worker.js', location.origin).href;
+  const dedicatedWorker = new Worker(dbWorkerUrl, { type: 'module' });
+
+  dedicatedWorker.onerror = (event) => {
+    console.error('[DB Client] Dedicated worker error:', event);
+  };
+
+  const channel = new MessageChannel();
+
+  // Send one end to the Dedicated Worker (it will listen on this port)
+  dedicatedWorker.postMessage({ action: '__attach_port__' }, [channel.port2]);
+
+  // Send the other end to the SharedWorker (it will forward requests through this port)
+  port!.postMessage(
+    { requestId: '__attach_worker__', action: '__attach_worker__' },
+    [channel.port1],
+  );
 }
 
 function sendRequest(action: string, params?: unknown): Promise<unknown> {
